@@ -139,6 +139,8 @@ fn main() {
         .add_startup_system(setup)
         .add_system_to_stage(CoreStage::PostUpdate, check_collisions)
         .add_system_to_stage(CoreStage::PostUpdate, process_picking)
+        .add_system_to_stage(CoreStage::PostUpdate, expirations)
+        .add_system_to_stage(CoreStage::PostUpdate, expanding)
         .add_system(bevy::window::close_on_esc)
         .run();
 }
@@ -435,4 +437,47 @@ fn setup(
         },
         PickingCameraBundle::default(),
     ));
+}
+
+#[derive(Component, Clone)]
+pub struct Expandable {}
+
+pub fn expanding(mut expandables: Query<(&mut Transform, &Expandable)>, timer: Res<Time>) {
+    for (mut transform, _expandable) in &mut expandables {
+        transform.scale += Vec3::splat(0.3) * timer.delta_seconds()
+    }
+}
+
+#[derive(Component, Clone)]
+pub struct Expires {
+    lifetime: f32,
+    expiration: Option<f32>,
+}
+
+impl Expires {
+    pub fn after(lifetime: f32) -> Self {
+        Self {
+            lifetime,
+            expiration: None,
+        }
+    }
+}
+
+pub fn expirations(
+    mut commands: Commands,
+    mut expires: Query<(Entity, &mut Expires)>,
+    timer: Res<Time>,
+) {
+    for (entity, mut expires) in &mut expires {
+        match expires.expiration {
+            Some(expiration) => {
+                if timer.elapsed_seconds() > expiration {
+                    commands.entity(entity).despawn();
+                }
+            }
+            None => {
+                expires.expiration = Some(timer.elapsed_seconds() + expires.lifetime);
+            }
+        }
+    }
 }
