@@ -106,6 +106,9 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             window: WindowDescriptor {
+                title: "Castle".to_string(),
+                width: 1024. + 256. + 32.,
+                height: 768.,
                 present_mode: PresentMode::AutoNoVsync,
                 ..default()
             },
