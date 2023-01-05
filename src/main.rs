@@ -329,7 +329,7 @@ fn setup(
     // Rigid body ground
     commands.spawn((
         TransformBundle::from(Transform::from_xyz(0.0, 0.0, 0.0)),
-        Collider::cuboid(50., 0.1, 50.),
+        Collider::cuboid(20., 0.1, 20.),
     ));
 
     let ground = meshes.add(Mesh::from(shape::Box::new(0.95, 0.2, 0.95)));
