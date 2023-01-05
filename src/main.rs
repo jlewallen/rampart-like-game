@@ -299,7 +299,6 @@ pub fn process_picking(
 
                         info!(
                             %distance, %velocity,
-                            %vertical_velocity, %horizontal_velocity,
                             "firing {} -> {}", cannon_name.as_str(), target_name.as_str(),
                         );
 
