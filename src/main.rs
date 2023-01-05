@@ -184,6 +184,7 @@ fn check_collisions(
                 sizes.add_key(0.3, Vec2::splat(0.1));
                 sizes.add_key(1.0, Vec2::splat(0.0));
 
+                // TODO Leaking?
                 let effect = effects.add(
                     EffectAsset {
                         name: "Firework".to_string(),
@@ -234,7 +235,7 @@ pub fn process_picking(
     transforms: Query<&Transform>,
     cannons: Query<(Entity, &Transform), With<Cannon>>,
 ) {
-    let mesh: Handle<Mesh> = meshes.add(shape::Icosphere::default().into()).into();
+    let mesh: Handle<Mesh> = meshes.add(shape::Icosphere::default().into());
 
     let black = materials.add(StandardMaterial {
         base_color: Color::BLACK,
