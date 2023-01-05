@@ -31,11 +31,17 @@ impl<T: Default + Clone> WorldGeometry<T> {
         }
     }
 
-    pub fn layout(&self) -> Vec<(Vec2, &T)> {
+    pub fn layout(&self) -> Vec<(Vec2Usize, Vec2, &T)> {
         self.map
             .iter()
             .enumerate()
-            .map(|(index, value)| (self.index_to_coordindates(index), value))
+            .map(|(index, value)| {
+                (
+                    self.index_to_grid(index),
+                    self.index_to_coordindates(index),
+                    value,
+                )
+            })
             .collect()
     }
 
@@ -44,9 +50,16 @@ impl<T: Default + Clone> WorldGeometry<T> {
         self.map[index] = value;
     }
 
+    fn index_to_grid(&self, index: usize) -> Vec2Usize {
+        let x = index % self.size.0;
+        let y = index / self.size.1;
+        (x, y)
+    }
+
     fn index_to_coordindates(&self, index: usize) -> Vec2 {
-        let x: f32 = ((index % self.size.0) as f32 - (self.size.0 / 2) as f32) * 1.0 + 0.5;
-        let y: f32 = ((index / self.size.1) as f32 - (self.size.1 / 2) as f32) * 1.0 + 0.5;
+        let c = self.index_to_grid(index);
+        let x: f32 = (c.0 as f32 - (self.size.0 / 2) as f32) * 1.0 + 0.5;
+        let y: f32 = (c.1 as f32 - (self.size.1 / 2) as f32) * 1.0 + 0.5;
         Vec2::new(x, y)
     }
 
@@ -161,18 +174,6 @@ fn check_collisions(
 
                 commands.entity(*projectile).despawn();
 
-                /*
-                commands.spawn(PointLightBundle {
-                    point_light: PointLight {
-                        intensity: 15000.0,
-                        shadows_enabled: true,
-                        ..default()
-                    },
-                    transform: Transform::from_xyz(0.0, 5.0, 0.0),
-                    ..default()
-                });
-                */
-
                 let mut colors = Gradient::new();
                 colors.add_key(0.0, Vec4::new(4.0, 4.0, 4.0, 1.0));
                 colors.add_key(0.1, Vec4::new(4.0, 4.0, 0.0, 1.0));
@@ -207,16 +208,36 @@ fn check_collisions(
                     .render(SizeOverLifetimeModifier { gradient: sizes }),
                 );
 
-                // TODO Either re-use these or garbage collect them after
-                // they're completed.
-                commands.spawn((
-                    Name::new("Firework"),
-                    ParticleEffectBundle {
-                        effect: ParticleEffect::new(effect),
-                        transform: Transform::from_translation(showtime.translation),
-                        ..Default::default()
-                    },
-                ));
+                commands
+                    .spawn((
+                        Name::new("Explosion"),
+                        Expires::after(5.),
+                        SpatialBundle {
+                            transform: Transform::from_translation(showtime.translation),
+                            ..default()
+                        },
+                    ))
+                    .with_children(|child_builder| {
+                        child_builder.spawn((
+                            Name::new("Firework"),
+                            ParticleEffectBundle {
+                                effect: ParticleEffect::new(effect),
+                                ..Default::default()
+                            },
+                        ));
+                        child_builder.spawn((
+                            Name::new("Explosion:Light"),
+                            Expires::after(0.05),
+                            PointLightBundle {
+                                point_light: PointLight {
+                                    intensity: 15000.0,
+                                    shadows_enabled: true,
+                                    ..default()
+                                },
+                                ..default()
+                            },
+                        ));
+                    });
             }
             CollisionEvent::Stopped(_, _, _) => {}
         }
@@ -232,8 +253,8 @@ pub fn process_picking(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut events: EventReader<PickingEvent>,
-    transforms: Query<&Transform>,
-    cannons: Query<(Entity, &Transform), With<Cannon>>,
+    targets: Query<(&Transform, &Name)>,
+    cannons: Query<(Entity, &Transform, &Name), With<Cannon>>,
 ) {
     let mesh: Handle<Mesh> = meshes.add(shape::Icosphere::default().into());
 
@@ -247,11 +268,11 @@ pub fn process_picking(
         match event {
             PickingEvent::Selection(e) => info!("selection: {:?}", e),
             PickingEvent::Clicked(e) => {
-                let target = transforms.get(*e).expect("Clicked entity not found?");
+                let (target, target_name) = targets.get(*e).expect("Clicked entity not found?");
                 let target = target.translation;
 
                 match cannons.iter().next() {
-                    Some((_e, cannon)) => {
+                    Some((_e, cannon, cannon_name)) => {
                         let zero_y = Vec3::new(1., 0., 1.);
                         let direction = (target - cannon.translation) * zero_y;
                         let distance = direction.length();
@@ -277,9 +298,9 @@ pub fn process_picking(
                             + Vec3::new(0., vertical_velocity, 0.);
 
                         info!(
-                            %direction, %distance, %velocity,
+                            %distance, %velocity,
                             %vertical_velocity, %horizontal_velocity,
-                            "firing",
+                            "firing {} -> {}", cannon_name.as_str(), target_name.as_str(),
                         );
 
                         let size = 0.25;
@@ -355,9 +376,9 @@ fn setup(
         ..default()
     });
 
-    for (position, item) in terrain.ground_layer.layout() {
+    for (grid, position, item) in terrain.ground_layer.layout() {
         commands.spawn((
-            Name::new("Ground"),
+            Name::new(format!("Ground{:?}", &grid)),
             PbrBundle {
                 mesh: ground.clone(),
                 material: match item {
@@ -386,10 +407,10 @@ fn setup(
         ..default()
     });
 
-    for (position, item) in terrain.structure_layer.layout() {
+    for (grid, position, item) in terrain.structure_layer.layout() {
         if let Some(item) = item {
             commands.spawn((
-                Name::new("Structure"),
+                Name::new(format!("Structure{:?}", &grid)),
                 PbrBundle {
                     mesh: structure.clone(),
                     material: match item {
@@ -408,28 +429,31 @@ fn setup(
     }
 
     const HALF_SIZE: f32 = 10.0;
-    commands.spawn(DirectionalLightBundle {
-        directional_light: DirectionalLight {
-            illuminance: 5000.,
-            shadow_projection: OrthographicProjection {
-                left: -HALF_SIZE,
-                right: HALF_SIZE,
-                bottom: -HALF_SIZE,
-                top: HALF_SIZE,
-                near: -10.0 * HALF_SIZE,
-                far: 10.0 * HALF_SIZE,
+    commands.spawn((
+        Name::new("Sun"),
+        DirectionalLightBundle {
+            directional_light: DirectionalLight {
+                illuminance: 5000.,
+                shadow_projection: OrthographicProjection {
+                    left: -HALF_SIZE,
+                    right: HALF_SIZE,
+                    bottom: -HALF_SIZE,
+                    top: HALF_SIZE,
+                    near: -10.0 * HALF_SIZE,
+                    far: 10.0 * HALF_SIZE,
+                    ..default()
+                },
+                shadows_enabled: true,
                 ..default()
             },
-            shadows_enabled: true,
+            transform: Transform {
+                translation: Vec3::new(0.0, 2.0, 0.0),
+                rotation: Quat::from_rotation_x(-PI / 4.),
+                ..default()
+            },
             ..default()
         },
-        transform: Transform {
-            translation: Vec3::new(0.0, 2.0, 0.0),
-            rotation: Quat::from_rotation_x(-PI / 4.),
-            ..default()
-        },
-        ..default()
-    });
+    ));
 
     commands.spawn((
         Camera3dBundle {
@@ -466,14 +490,16 @@ impl Expires {
 
 pub fn expirations(
     mut commands: Commands,
-    mut expires: Query<(Entity, &mut Expires)>,
+    mut expires: Query<(Entity, &mut Expires, Option<&Name>)>,
     timer: Res<Time>,
 ) {
-    for (entity, mut expires) in &mut expires {
+    for (entity, mut expires, name) in &mut expires {
         match expires.expiration {
             Some(expiration) => {
                 if timer.elapsed_seconds() > expiration {
-                    commands.entity(entity).despawn();
+                    // https://bevy-cheatbook.github.io/features/parent-child.html#known-pitfalls
+                    info!("expiring {:?} '{:?}'", entity, name.map(|n| n.as_str()));
+                    commands.entity(entity).despawn_recursive();
                 }
             }
             None => {
