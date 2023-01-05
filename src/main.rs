@@ -1,9 +1,10 @@
-use bevy::{
-    diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
-    prelude::*,
-    window::PresentMode,
+use bevy::{diagnostic::FrameTimeDiagnosticsPlugin, prelude::*, window::PresentMode};
+use bevy_hanabi::prelude::*;
+use bevy_mod_picking::{
+    CustomHighlightPlugin, DefaultHighlighting, DefaultPickingPlugins, PickableBundle,
+    PickingCameraBundle, PickingEvent,
 };
-use bevy_mod_picking::{DefaultPickingPlugins, PickableBundle, PickingCameraBundle, PickingEvent};
+use bevy_rapier3d::prelude::*;
 use std::f32::consts::PI;
 
 pub type Vec2Usize = (usize, usize);
@@ -67,18 +68,13 @@ impl Default for Ground {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct Wall {
-    orientation: u32,
-    integrity: f32,
-}
+#[derive(Component, Clone, Debug)]
+pub struct Wall {}
 
-#[derive(Clone, Debug)]
-pub struct Cannon {
-    integrity: f32,
-}
+#[derive(Component, Clone, Debug)]
+pub struct Cannon {}
 
-#[derive(Clone, Debug)]
+#[derive(Component, Clone, Debug)]
 pub enum Structure {
     Wall(Wall),
     Cannon(Cannon),
@@ -101,6 +97,7 @@ impl Terrain {
 
 pub trait Projectile {}
 
+#[derive(Component, Clone, Debug)]
 pub struct RoundShot {}
 
 impl Projectile for RoundShot {}
@@ -109,24 +106,201 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             window: WindowDescriptor {
-                present_mode: PresentMode::AutoNoVsync, // Reduce input latency
+                present_mode: PresentMode::AutoNoVsync,
                 ..default()
             },
             ..default()
         }))
-        .add_plugins(DefaultPickingPlugins)
-        .add_plugin(LogDiagnosticsPlugin::default())
+        .add_plugins(
+            DefaultPickingPlugins
+                .set(CustomHighlightPlugin::<StandardMaterial> {
+                    highlighting_default: |mut assets| DefaultHighlighting {
+                        hovered: assets.add(Color::rgb(0.35, 0.35, 0.35).into()),
+                        pressed: assets.add(Color::rgb(0.35, 0.75, 0.35).into()),
+                        selected: assets.add(Color::rgb(0.35, 0.35, 0.75).into()),
+                    },
+                })
+                .set(CustomHighlightPlugin::<ColorMaterial> {
+                    highlighting_default: |mut assets| DefaultHighlighting {
+                        hovered: assets.add(Color::rgb(0.35, 0.35, 0.35).into()),
+                        pressed: assets.add(Color::rgb(0.35, 0.75, 0.35).into()),
+                        selected: assets.add(Color::rgb(0.35, 0.35, 0.75).into()),
+                    },
+                }),
+        )
+        .add_plugin(HanabiPlugin)
+        .add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
+        .add_plugin(RapierDebugRenderPlugin::default())
+        // .add_plugin(LogDiagnosticsPlugin::default())
         .add_plugin(FrameTimeDiagnosticsPlugin::default())
         .add_startup_system(setup)
-        .add_system_to_stage(CoreStage::PostUpdate, print_events)
+        .add_system_to_stage(CoreStage::PostUpdate, check_collisions)
+        .add_system_to_stage(CoreStage::PostUpdate, process_picking)
+        .add_system(bevy::window::close_on_esc)
         .run();
 }
 
-pub fn print_events(mut events: EventReader<PickingEvent>) {
+fn check_collisions(
+    mut commands: Commands,
+    mut collision_events: EventReader<CollisionEvent>,
+    mut contact_force_events: EventReader<ContactForceEvent>,
+    mut effects: ResMut<Assets<EffectAsset>>,
+    transforms: Query<&Transform>,
+) {
+    for collision_event in collision_events.iter() {
+        info!("collision: {:?}", collision_event);
+
+        match collision_event {
+            CollisionEvent::Started(_structure, projectile, _) => {
+                let showtime = transforms.get(*projectile).expect("No collision entity");
+
+                commands.entity(*projectile).despawn();
+
+                /*
+                commands.spawn(PointLightBundle {
+                    point_light: PointLight {
+                        intensity: 15000.0,
+                        shadows_enabled: true,
+                        ..default()
+                    },
+                    transform: Transform::from_xyz(0.0, 5.0, 0.0),
+                    ..default()
+                });
+                */
+
+                let mut colors = Gradient::new();
+                colors.add_key(0.0, Vec4::new(4.0, 4.0, 4.0, 1.0));
+                colors.add_key(0.1, Vec4::new(4.0, 4.0, 0.0, 1.0));
+                colors.add_key(0.9, Vec4::new(4.0, 0.0, 0.0, 1.0));
+                colors.add_key(1.0, Vec4::new(4.0, 0.0, 0.0, 0.0));
+
+                let mut sizes = Gradient::new();
+                sizes.add_key(0.0, Vec2::splat(0.1));
+                sizes.add_key(0.3, Vec2::splat(0.1));
+                sizes.add_key(1.0, Vec2::splat(0.0));
+
+                let effect = effects.add(
+                    EffectAsset {
+                        name: "Firework".to_string(),
+                        capacity: 32768,
+                        spawner: Spawner::once(500.0.into(), true),
+                        ..Default::default()
+                    }
+                    .init(PositionSphereModifier {
+                        dimension: ShapeDimension::Volume,
+                        radius: 0.25,
+                        speed: 70_f32.into(),
+                        center: Vec3::ZERO,
+                    })
+                    .init(ParticleLifetimeModifier { lifetime: 0.3 })
+                    .update(LinearDragModifier { drag: 5. })
+                    .update(AccelModifier {
+                        accel: Vec3::new(0., -8., 0.),
+                    })
+                    .render(ColorOverLifetimeModifier { gradient: colors })
+                    .render(SizeOverLifetimeModifier { gradient: sizes }),
+                );
+
+                // TODO Either re-use these or garbage collect them after
+                // they're completed.
+                commands.spawn((
+                    Name::new("Firework"),
+                    ParticleEffectBundle {
+                        effect: ParticleEffect::new(effect),
+                        transform: Transform::from_translation(showtime.translation),
+                        ..Default::default()
+                    },
+                ));
+            }
+            CollisionEvent::Stopped(_, _, _) => {}
+        }
+    }
+
+    for contact_force_event in contact_force_events.iter() {
+        info!("contact force: {:?}", contact_force_event);
+    }
+}
+
+pub fn process_picking(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut events: EventReader<PickingEvent>,
+    transforms: Query<&Transform>,
+    cannons: Query<(Entity, &Transform), With<Cannon>>,
+) {
+    let mesh: Handle<Mesh> = meshes.add(shape::Icosphere::default().into()).into();
+
+    let black = materials.add(StandardMaterial {
+        base_color: Color::BLACK,
+        perceptual_roughness: 0.3,
+        ..default()
+    });
+
     for event in events.iter() {
         match event {
             PickingEvent::Selection(e) => info!("selection: {:?}", e),
-            PickingEvent::Clicked(e) => info!("clicked: {:?}", e),
+            PickingEvent::Clicked(e) => {
+                let target = transforms.get(*e).expect("Clicked entity not found?");
+                let target = target.translation;
+
+                match cannons.iter().next() {
+                    Some((_e, cannon)) => {
+                        let zero_y = Vec3::new(1., 0., 1.);
+                        let direction = (target - cannon.translation) * zero_y;
+                        let distance = direction.length();
+                        let direction = direction.normalize();
+
+                        // We base all the math on a desired time of flight that
+                        // looks appropriate for the distance.
+                        const MAXIMUM_HORIZONTAL_DISTANCE: f32 = 35.0;
+                        const MINIMUM_FLIGHT_TIME: f32 = 1.0;
+                        const GRAVITY: f32 = 9.8;
+
+                        let desired_time_of_flight =
+                            (distance / MAXIMUM_HORIZONTAL_DISTANCE) + MINIMUM_FLIGHT_TIME;
+                        // Vertical velocity to reach apex half way through.
+                        let vertical_velocity = GRAVITY * (desired_time_of_flight / 2.0);
+                        // Gotta go `distance` so however long that will take.
+                        let horizontal_velocity = distance / desired_time_of_flight;
+
+                        let mass = 20.0;
+
+                        // Final velocity is horizontal plus vertical.
+                        let velocity = (direction * horizontal_velocity)
+                            + Vec3::new(0., vertical_velocity, 0.);
+
+                        info!(
+                            %direction, %distance, %velocity,
+                            %vertical_velocity, %horizontal_velocity,
+                            "firing",
+                        );
+
+                        let size = 0.25;
+
+                        commands.spawn((
+                            Name::new("Projectile"),
+                            PbrBundle {
+                                mesh: mesh.clone(),
+                                material: black.clone(),
+                                transform: Transform::from_translation(cannon.translation)
+                                    .with_scale(Vec3::new(size, size, size)),
+                                ..default()
+                            },
+                            ColliderMassProperties::Mass(mass),
+                            RigidBody::Dynamic,
+                            ActiveEvents::COLLISION_EVENTS,
+                            RoundShot {},
+                            Collider::ball(size / 2.),
+                            Velocity {
+                                linvel: velocity,
+                                angvel: Vec3::ZERO,
+                            },
+                        ));
+                    }
+                    None => warn!("no cannons"),
+                }
+            }
             PickingEvent::Hover(_) => {}
         }
     }
@@ -137,7 +311,7 @@ pub fn load_terrain() -> Terrain {
     terrain.ground_layer.set((4, 4), Ground::Grass);
     terrain
         .structure_layer
-        .set((4, 5), Some(Structure::Cannon(Cannon { integrity: 1. })));
+        .set((4, 5), Some(Structure::Cannon(Cannon {})));
     terrain
 }
 
@@ -145,10 +319,17 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut _effects: ResMut<Assets<EffectAsset>>,
 ) {
     let terrain = load_terrain();
 
-    let ground = meshes.add(Mesh::from(shape::Cube { size: 0.95 }));
+    // Rigid body ground
+    commands.spawn((
+        TransformBundle::from(Transform::from_xyz(0.0, 0.0, 0.0)),
+        Collider::cuboid(50., 0.1, 50.),
+    ));
+
+    let ground = meshes.add(Mesh::from(shape::Box::new(0.95, 0.2, 0.95)));
 
     let dirt = materials.add(StandardMaterial {
         base_color: Color::BEIGE,
@@ -169,9 +350,8 @@ fn setup(
     });
 
     for (position, item) in terrain.ground_layer.layout() {
-        println!("{:?} {:?}", position, item);
-
         commands.spawn((
+            Name::new("Ground"),
             PbrBundle {
                 mesh: ground.clone(),
                 material: match item {
@@ -179,15 +359,14 @@ fn setup(
                     Ground::Grass => grass.clone(),
                     Ground::Water => water.clone(),
                 },
-                transform: Transform::from_scale(Vec3::new(1., 0.2, 1.))
-                    * Transform::from_xyz(position.x, 0.0, position.y),
+                transform: Transform::from_xyz(position.x, 0.0, position.y),
                 ..default()
             },
             PickableBundle::default(),
         ));
     }
 
-    let structure = meshes.add(Mesh::from(shape::Cube { size: 0.6 }));
+    let structure = meshes.add(Mesh::from(shape::Box::new(0.6, 0.6, 0.6)));
 
     let wall = materials.add(StandardMaterial {
         base_color: Color::FUCHSIA,
@@ -203,35 +382,24 @@ fn setup(
 
     for (position, item) in terrain.structure_layer.layout() {
         if let Some(item) = item {
-            println!("{:?} {:?}", position, item);
-
             commands.spawn((
+                Name::new("Structure"),
                 PbrBundle {
                     mesh: structure.clone(),
                     material: match item {
                         Structure::Wall(_) => wall.clone(),
                         Structure::Cannon(_) => cannon.clone(),
                     },
-                    transform: Transform::from_scale(Vec3::new(1., 1., 1.))
-                        * Transform::from_xyz(position.x, 0.4, position.y),
+                    transform: Transform::from_xyz(position.x, 0.4, position.y),
                     ..default()
                 },
                 PickableBundle::default(),
+                // We need to be able to exclude this from colliding with its own projectiles.
+                // Collider::cuboid(0.3, 0.3, 0.3),
+                Cannon {},
             ));
         }
     }
-
-    /*
-    commands.spawn(PointLightBundle {
-        point_light: PointLight {
-            intensity: 15000.0,
-            shadows_enabled: true,
-            ..default()
-        },
-        transform: Transform::from_xyz(0.0, 5.0, 0.0),
-        ..default()
-    });
-    */
 
     const HALF_SIZE: f32 = 10.0;
     commands.spawn(DirectionalLightBundle {
