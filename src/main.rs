@@ -23,6 +23,29 @@ pub struct WorldGeometry<T> {
     map: Vec<T>,
 }
 
+#[derive(Debug)]
+pub struct Around<T>((T, T, T), (T, T, T), (T, T, T));
+
+impl<T> Around<T> {
+    pub fn map<R>(&self, map_fn: &dyn Fn(&T) -> R) -> Around<R> {
+        Around(
+            (map_fn(&self.0 .0), map_fn(&self.0 .1), map_fn(&self.0 .2)),
+            (map_fn(&self.1 .0), map_fn(&self.1 .1), map_fn(&self.1 .2)),
+            (map_fn(&self.2 .0), map_fn(&self.2 .1), map_fn(&self.2 .2)),
+        )
+    }
+}
+
+impl Around<Vec2Usize> {
+    pub fn center(c: Vec2Usize) -> Self {
+        Self(
+            ((c.0 - 1, c.1 - 1), (c.0, c.1 - 1), (c.0 + 1, c.1 - 1)),
+            ((c.0 - 1, c.1), (c.0, c.1), (c.0 + 1, c.1)),
+            ((c.0 - 1, c.1 + 1), (c.0, c.1 + 1), (c.0 + 1, c.1 + 1)),
+        )
+    }
+}
+
 impl<T> WorldGeometry<T>
 where
     T: Default + Clone,
@@ -37,6 +60,15 @@ where
     pub fn set(&mut self, c: Vec2Usize, value: T) {
         let index = self.coordinates_to_index(c);
         self.map[index] = value;
+    }
+
+    pub fn get(&self, c: Vec2Usize) -> Option<&T> {
+        let index = self.coordinates_to_index(c);
+        if index < self.map.len() {
+            Some(&self.map[index])
+        } else {
+            None
+        }
     }
 
     pub fn outline(&mut self, (x0, y0): Vec2Usize, (x1, y1): Vec2Usize, value: T) {
@@ -64,8 +96,8 @@ where
             .collect()
     }
 
-    pub fn around(&self, c: Vec2Usize) {
-        todo!()
+    pub fn around(&self, c: Vec2Usize) -> Around<Option<&T>> {
+        Around::center(c).map(&|c| self.get(*c))
     }
 
     fn index_to_grid(&self, index: usize) -> Vec2Usize {
@@ -369,6 +401,29 @@ pub fn load_terrain() -> Terrain {
     terrain
 }
 
+#[derive(Debug)]
+pub enum ConnectingWall {
+    Isolated,
+    Vertical,
+    Horizontal,
+    Corner(u32),
+    Unknown,
+}
+
+impl<T> From<&Around<Option<&Option<T>>>> for ConnectingWall {
+    fn from(value: &Around<Option<&Option<T>>>) -> Self {
+        match value {
+            Around((_, _, _), (_, _, Some(Some(_))), (_, Some(Some(_)), _)) => Self::Corner(0), // Bottom Right
+            Around((_, _, _), (Some(Some(_)), _, _), (_, Some(Some(_)), _)) => Self::Corner(90), // Bottom Left
+            Around((_, Some(Some(_)), _), (_, _, Some(Some(_))), (_, _, _)) => Self::Corner(180), // Top Right
+            Around((_, Some(Some(_)), _), (Some(Some(_)), _, _), (_, _, _)) => Self::Corner(270), // Top Left
+            Around(_, (Some(Some(_)), _, Some(Some(_))), _) => Self::Horizontal,
+            Around((_, Some(Some(_)), _), (_, _, _), (_, Some(Some(_)), _)) => Self::Vertical,
+            Around((_, _, _), (_, _, _), (_, _, _)) => Self::Unknown,
+        }
+    }
+}
+
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -469,14 +524,34 @@ fn setup(
         ..default()
     });
 
+    let wall_unknown = meshes.add(Mesh::from(shape::Box::new(0.90, 0.90, 0.90)));
+    let wall_corner = meshes.add(Mesh::from(shape::Box::new(0.4, 0.6, 0.4)));
+    let wall_v = meshes.add(Mesh::from(shape::Box::new(0.4, 0.6, 1.0)));
+    let wall_h = meshes.add(Mesh::from(shape::Box::new(1.0, 0.6, 0.4)));
+
     for (grid, position, item) in terrain.structure_layer.layout() {
         if let Some(item) = item {
             match item {
                 Structure::Wall(wall) => {
+                    let around = &terrain.structure_layer.around(grid);
+
+                    let connecting: ConnectingWall = around.into();
+
+                    info!("{:?} {:?}", grid, connecting);
+
                     commands.spawn((
                         Name::new(format!("Wall{:?}", &grid)),
                         PbrBundle {
-                            mesh: structure.clone(),
+                            mesh: match connecting {
+                                ConnectingWall::Corner(0) => wall_corner.clone(),
+                                ConnectingWall::Corner(90) => wall_corner.clone(),
+                                ConnectingWall::Corner(180) => wall_corner.clone(),
+                                ConnectingWall::Corner(270) => wall_corner.clone(),
+                                ConnectingWall::Vertical => wall_v.clone(),
+                                ConnectingWall::Horizontal => wall_h.clone(),
+                                ConnectingWall::Isolated => wall_unknown.clone(),
+                                _ => wall_unknown.clone(),
+                            },
                             material: wall_simple.clone(),
                             transform: Transform::from_xyz(position.x, 0.4, position.y),
                             ..default()
