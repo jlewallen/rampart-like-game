@@ -671,7 +671,7 @@ fn setup(
                             },
                             PickableBundle::default(),
                             CollisionGroups::new(Group::all(), Group::all()),
-                            Collider::cuboid(0.3, 0.3, 0.3),
+                            Collider::cuboid(TILE_SIZE / 2., STRUCTURE_HEIGHT / 2., TILE_SIZE / 2.),
                             cannon.clone(),
                         ))
                         .with_children(|parent| {
