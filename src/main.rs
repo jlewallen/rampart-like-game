@@ -523,6 +523,7 @@ fn setup(
     commands.spawn((
         Name::new("Ground"),
         TransformBundle::from(Transform::from_xyz(0.0, 0.0, 0.0)),
+        CollisionGroups::new(Group::all(), Group::all()),
         Collider::cuboid(20., 0.1, 20.),
     ));
 
@@ -608,6 +609,7 @@ fn setup(
                             },
                             PickableBundle::default(),
                             Collider::cuboid(TILE_SIZE / 2., STRUCTURE_HEIGHT / 2., TILE_SIZE / 2.),
+                            CollisionGroups::new(Group::all(), Group::all()),
                             wall.clone(),
                         ))
                         .with_children(|parent| match connecting {
@@ -662,8 +664,8 @@ fn setup(
                                 ..default()
                             },
                             PickableBundle::default(),
-                            // We need to be able to exclude this from colliding with its own projectiles.
-                            // Collider::cuboid(0.3, 0.3, 0.3),
+                            CollisionGroups::new(Group::all(), Group::all()),
+                            Collider::cuboid(0.3, 0.3, 0.3),
                             cannon.clone(),
                         ))
                         .with_children(|parent| {
