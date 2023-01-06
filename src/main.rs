@@ -219,19 +219,32 @@ fn check_collisions(
     mut collision_events: EventReader<CollisionEvent>,
     mut contact_force_events: EventReader<ContactForceEvent>,
     mut effects: ResMut<Assets<EffectAsset>>,
+    projectiles: Query<Option<&RoundShot>>,
     transforms: Query<&Transform>,
     names: Query<&Name>,
 ) {
     for collision_event in collision_events.iter() {
         match collision_event {
-            CollisionEvent::Started(structure, projectile, _) => {
+            CollisionEvent::Started(first, second, _) => {
+                let (target, projectile) = (|| {
+                    if projectiles
+                        .get(*first)
+                        .expect("Projectile check failed")
+                        .is_some()
+                    {
+                        (second, first)
+                    } else {
+                        (first, second)
+                    }
+                })();
+
                 let showtime = transforms.get(*projectile).expect("No collision entity");
 
-                commands.entity(*projectile).despawn();
+                commands.entity(*projectile).despawn_recursive();
 
                 info!(
-                    "collision: with={:?} projectile={:?}",
-                    names.get(*structure).map(|s| s.as_str()),
+                    "collision: target={:?} projectile={:?}",
+                    names.get(*target).map(|s| s.as_str()),
                     names.get(*projectile).map(|s| s.as_str())
                 );
 
@@ -577,8 +590,7 @@ fn setup(
                                 ..default()
                             },
                             PickableBundle::default(),
-                            // We need to be able to exclude this from colliding with its own projectiles.
-                            // Collider::cuboid(0.3, 0.3, 0.3),
+                            Collider::cuboid(TILE_SIZE / 2., STRUCTURE_HEIGHT / 2., TILE_SIZE / 2.),
                             wall.clone(),
                         ))
                         .with_children(|parent| match connecting {
