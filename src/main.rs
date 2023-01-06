@@ -5,7 +5,7 @@ use bevy_mod_picking::{
     PickingCameraBundle, PickingEvent,
 };
 use bevy_rapier3d::prelude::*;
-use std::f32::consts::PI;
+use std::f32::consts::*;
 
 pub type Vec2Usize = (usize, usize);
 
@@ -23,11 +23,30 @@ pub struct WorldGeometry<T> {
     map: Vec<T>,
 }
 
-impl<T: Default + Clone> WorldGeometry<T> {
+impl<T> WorldGeometry<T>
+where
+    T: Default + Clone,
+{
     pub fn new(size: Vec2Usize) -> Self {
         Self {
             size,
             map: vec![T::default(); size.0 * size.1],
+        }
+    }
+
+    pub fn set(&mut self, c: Vec2Usize, value: T) {
+        let index = self.coordinates_to_index(c);
+        self.map[index] = value;
+    }
+
+    pub fn outline(&mut self, (x0, y0): Vec2Usize, (x1, y1): Vec2Usize, value: T) {
+        for x in x0..(x1 + 1) {
+            self.set((x, y0), value.clone());
+            self.set((x, y1), value.clone());
+        }
+        for y in (y0 + 1)..y1 {
+            self.set((x0, y), value.clone());
+            self.set((x1, y), value.clone());
         }
     }
 
@@ -45,15 +64,12 @@ impl<T: Default + Clone> WorldGeometry<T> {
             .collect()
     }
 
-    pub fn set(&mut self, c: Vec2Usize, value: T) {
-        let index = self.coordinates_to_index(c);
-        self.map[index] = value;
+    pub fn around(&self, c: Vec2Usize) {
+        todo!()
     }
 
     fn index_to_grid(&self, index: usize) -> Vec2Usize {
-        let x = index % self.size.0;
-        let y = index / self.size.1;
-        (x, y)
+        (index % self.size.0, index / self.size.1)
     }
 
     fn index_to_coordindates(&self, index: usize) -> Vec2 {
@@ -68,7 +84,7 @@ impl<T: Default + Clone> WorldGeometry<T> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Component, Clone, Debug)]
 pub enum Ground {
     Dirt,
     Grass,
@@ -87,7 +103,7 @@ pub struct Wall {}
 #[derive(Component, Clone, Debug)]
 pub struct Cannon {}
 
-#[derive(Component, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub enum Structure {
     Wall(Wall),
     Cannon(Cannon),
@@ -146,7 +162,7 @@ fn main() {
         )
         .add_plugin(HanabiPlugin)
         .add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
-        .add_plugin(RapierDebugRenderPlugin::default())
+        // .add_plugin(RapierDebugRenderPlugin::default())
         // .add_plugin(LogDiagnosticsPlugin::default())
         .add_plugin(FrameTimeDiagnosticsPlugin::default())
         .add_startup_system(setup)
@@ -155,6 +171,7 @@ fn main() {
         .add_system_to_stage(CoreStage::PostUpdate, expirations)
         .add_system_to_stage(CoreStage::PostUpdate, expanding)
         .add_system(bevy::window::close_on_esc)
+        .insert_resource(ClearColor(Color::hex("152238").unwrap()))
         .run();
 }
 
@@ -335,9 +352,15 @@ pub fn process_picking(
 pub fn load_terrain() -> Terrain {
     let mut terrain = Terrain::new((32, 32));
     terrain.ground_layer.set((4, 4), Ground::Grass);
+
     terrain
         .structure_layer
-        .set((4, 5), Some(Structure::Cannon(Cannon {})));
+        .outline((2, 2), (6, 6), Some(Structure::Wall(Wall {})));
+
+    terrain
+        .structure_layer
+        .set((4, 4), Some(Structure::Cannon(Cannon {})));
+
     terrain
 }
 
@@ -347,6 +370,41 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut _effects: ResMut<Assets<EffectAsset>>,
 ) {
+    const HALF_SIZE: f32 = 10.0;
+    commands.spawn((
+        Name::new("Sun"),
+        DirectionalLightBundle {
+            directional_light: DirectionalLight {
+                illuminance: 5000.,
+                shadow_projection: OrthographicProjection {
+                    left: -HALF_SIZE,
+                    right: HALF_SIZE,
+                    bottom: -HALF_SIZE,
+                    top: HALF_SIZE,
+                    near: -10.0 * HALF_SIZE,
+                    far: 10.0 * HALF_SIZE,
+                    ..default()
+                },
+                shadows_enabled: true,
+                ..default()
+            },
+            transform: Transform {
+                translation: Vec3::new(0.0, 2.0, 0.0),
+                rotation: Quat::from_rotation_x(-PI / 4.),
+                ..default()
+            },
+            ..default()
+        },
+    ));
+
+    commands.spawn((
+        Camera3dBundle {
+            transform: Transform::from_xyz(0.0, 18.0, -32.0).looking_at(Vec3::ZERO, Vec3::Y),
+            ..default()
+        },
+        PickingCameraBundle::default(),
+    ));
+
     let terrain = load_terrain();
 
     // Rigid body ground
@@ -394,13 +452,13 @@ fn setup(
 
     let structure = meshes.add(Mesh::from(shape::Box::new(0.6, 0.6, 0.6)));
 
-    let wall = materials.add(StandardMaterial {
+    let wall_simple = materials.add(StandardMaterial {
         base_color: Color::FUCHSIA,
         perceptual_roughness: 1.0,
         ..default()
     });
 
-    let cannon = materials.add(StandardMaterial {
+    let cannon_simple = materials.add(StandardMaterial {
         base_color: Color::RED,
         perceptual_roughness: 0.3,
         ..default()
@@ -408,59 +466,40 @@ fn setup(
 
     for (grid, position, item) in terrain.structure_layer.layout() {
         if let Some(item) = item {
-            commands.spawn((
-                Name::new(format!("Structure{:?}", &grid)),
-                PbrBundle {
-                    mesh: structure.clone(),
-                    material: match item {
-                        Structure::Wall(_) => wall.clone(),
-                        Structure::Cannon(_) => cannon.clone(),
-                    },
-                    transform: Transform::from_xyz(position.x, 0.4, position.y),
-                    ..default()
-                },
-                PickableBundle::default(),
-                // We need to be able to exclude this from colliding with its own projectiles.
-                // Collider::cuboid(0.3, 0.3, 0.3),
-                Cannon {},
-            ));
+            match item {
+                Structure::Wall(wall) => {
+                    commands.spawn((
+                        Name::new(format!("Wall{:?}", &grid)),
+                        PbrBundle {
+                            mesh: structure.clone(),
+                            material: wall_simple.clone(),
+                            transform: Transform::from_xyz(position.x, 0.4, position.y),
+                            ..default()
+                        },
+                        PickableBundle::default(),
+                        // We need to be able to exclude this from colliding with its own projectiles.
+                        // Collider::cuboid(0.3, 0.3, 0.3),
+                        wall.clone(),
+                    ));
+                }
+                Structure::Cannon(cannon) => {
+                    commands.spawn((
+                        Name::new(format!("Cannon{:?}", &grid)),
+                        PbrBundle {
+                            mesh: structure.clone(),
+                            material: cannon_simple.clone(),
+                            transform: Transform::from_xyz(position.x, 0.4, position.y),
+                            ..default()
+                        },
+                        PickableBundle::default(),
+                        // We need to be able to exclude this from colliding with its own projectiles.
+                        // Collider::cuboid(0.3, 0.3, 0.3),
+                        cannon.clone(),
+                    ));
+                }
+            }
         }
     }
-
-    const HALF_SIZE: f32 = 10.0;
-    commands.spawn((
-        Name::new("Sun"),
-        DirectionalLightBundle {
-            directional_light: DirectionalLight {
-                illuminance: 5000.,
-                shadow_projection: OrthographicProjection {
-                    left: -HALF_SIZE,
-                    right: HALF_SIZE,
-                    bottom: -HALF_SIZE,
-                    top: HALF_SIZE,
-                    near: -10.0 * HALF_SIZE,
-                    far: 10.0 * HALF_SIZE,
-                    ..default()
-                },
-                shadows_enabled: true,
-                ..default()
-            },
-            transform: Transform {
-                translation: Vec3::new(0.0, 2.0, 0.0),
-                rotation: Quat::from_rotation_x(-PI / 4.),
-                ..default()
-            },
-            ..default()
-        },
-    ));
-
-    commands.spawn((
-        Camera3dBundle {
-            transform: Transform::from_xyz(0.0, 18.0, -32.0).looking_at(Vec3::ZERO, Vec3::Y),
-            ..default()
-        },
-        PickingCameraBundle::default(),
-    ));
 }
 
 #[derive(Component, Clone)]
