@@ -16,6 +16,12 @@ const WALL_WIDTH: f32 = 0.4;
 const TILE_SIZE: f32 = 1.0;
 const BRICK_COLOR: &str = "E7444A";
 
+// We base all the math on a desired time of flight that
+// looks appropriate for the distance.
+const MAXIMUM_HORIZONTAL_DISTANCE: f32 = 35.0;
+const MINIMUM_FLIGHT_TIME: f32 = 1.0;
+const GRAVITY: f32 = 9.8;
+
 pub struct Player(u32);
 
 pub enum Phase {
@@ -113,8 +119,8 @@ where
 
     fn index_to_coordindates(&self, index: usize) -> Vec2 {
         let c = self.index_to_grid(index);
-        let x: f32 = (c.0 as f32 - (self.size.0 / 2) as f32) * 1.0 + 0.5;
-        let y: f32 = (c.1 as f32 - (self.size.1 / 2) as f32) * 1.0 + 0.5;
+        let x: f32 = (c.0 as f32 - (self.size.0 / 2) as f32) * TILE_SIZE + (TILE_SIZE / 2.);
+        let y: f32 = (c.1 as f32 - (self.size.1 / 2) as f32) * TILE_SIZE + (TILE_SIZE / 2.);
         Vec2::new(x, y)
     }
 
@@ -351,12 +357,6 @@ pub fn process_picking(
                         let direction = (target - cannon.translation) * zero_y;
                         let distance = direction.length();
                         let direction = direction.normalize();
-
-                        // We base all the math on a desired time of flight that
-                        // looks appropriate for the distance.
-                        const MAXIMUM_HORIZONTAL_DISTANCE: f32 = 35.0;
-                        const MINIMUM_FLIGHT_TIME: f32 = 1.0;
-                        const GRAVITY: f32 = 9.8;
 
                         let desired_time_of_flight =
                             (distance / MAXIMUM_HORIZONTAL_DISTANCE) + MINIMUM_FLIGHT_TIME;
