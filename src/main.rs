@@ -359,6 +359,11 @@ pub fn process_picking(
                         let distance = direction.length();
                         let direction = direction.normalize();
 
+                        if distance < 1. {
+                            info!(%distance, "safety engaged");
+                            break;
+                        }
+
                         let desired_time_of_flight =
                             (distance / MAXIMUM_HORIZONTAL_DISTANCE) + MINIMUM_FLIGHT_TIME;
                         // Vertical velocity to reach apex half way through.
