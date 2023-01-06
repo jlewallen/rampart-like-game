@@ -364,6 +364,7 @@ pub fn process_picking(
                             break;
                         }
 
+                        let distance = distance - TILE_SIZE / 2.;
                         let desired_time_of_flight =
                             (distance / MAXIMUM_HORIZONTAL_DISTANCE) + MINIMUM_FLIGHT_TIME;
                         // Vertical velocity to reach apex half way through.
@@ -399,7 +400,7 @@ pub fn process_picking(
                                     initial + Vec3::new(0., 1., 0.),
                                 ),
                                 point_light: PointLight {
-                                    intensity: 15000.0,
+                                    intensity: 100.0,
                                     shadows_enabled: true,
                                     ..default()
                                 },
