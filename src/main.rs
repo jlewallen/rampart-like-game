@@ -270,8 +270,8 @@ pub fn process_picking(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut events: EventReader<PickingEvent>,
-    targets: Query<(&Transform, &Name)>,
-    cannons: Query<(Entity, &Transform, &Name), With<Cannon>>,
+    targets: Query<(&Transform, &Name), Without<Cannon>>, // Conflicts below, but won't work when we add enemy cannons.
+    mut cannons: Query<(Entity, &mut Transform, &Name), With<Cannon>>,
 ) {
     let mesh: Handle<Mesh> = meshes.add(shape::Icosphere::default().into());
 
@@ -288,8 +288,8 @@ pub fn process_picking(
                 let (target, target_name) = targets.get(*e).expect("Clicked entity not found?");
                 let target = target.translation;
 
-                match cannons.iter().next() {
-                    Some((_e, cannon, cannon_name)) => {
+                match cannons.iter_mut().next() {
+                    Some((_e, mut cannon, cannon_name)) => {
                         let zero_y = Vec3::new(1., 0., 1.);
                         let direction = (target - cannon.translation) * zero_y;
                         let distance = direction.length();
@@ -318,6 +318,11 @@ pub fn process_picking(
                             %distance, %velocity,
                             "firing {} -> {}", cannon_name.as_str(), target_name.as_str(),
                         );
+
+                        // This may need an offset to account for the mesh.
+                        // TODO Animate?
+                        let aim_angle = direction.angle_between(Vec3::new(-1., 0., 0.));
+                        cannon.rotation = Quat::from_rotation_y(aim_angle);
 
                         let size = 0.25;
 
