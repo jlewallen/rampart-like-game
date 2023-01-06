@@ -537,17 +537,9 @@ fn setup(
         ));
     }
 
-    let structure = meshes.add(Mesh::from(shape::Box::new(0.6, STRUCTURE_HEIGHT, 0.6)));
-
     let wall_simple = materials.add(StandardMaterial {
         base_color: Color::hex(BRICK_COLOR).expect("BRICK_COLOR"),
         perceptual_roughness: 1.0,
-        ..default()
-    });
-
-    let cannon_simple = materials.add(StandardMaterial {
-        base_color: Color::RED,
-        perceptual_roughness: 0.3,
         ..default()
     });
 
@@ -640,18 +632,6 @@ fn setup(
                                 ),
                                 ..default()
                             },
-                            /*
-                            PbrBundle {
-                                mesh: structure.clone(),
-                                material: cannon_simple.clone(),
-                                transform: Transform::from_xyz(
-                                    position.x,
-                                    STRUCTURE_HEIGHT / 2.0,
-                                    position.y,
-                                ),
-                                ..default()
-                            },
-                            */
                             PickableBundle::default(),
                             // We need to be able to exclude this from colliding with its own projectiles.
                             // Collider::cuboid(0.3, 0.3, 0.3),
