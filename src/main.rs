@@ -14,6 +14,7 @@ const GROUND_DEPTH: f32 = 0.2;
 const WALL_HEIGHT: f32 = 0.6;
 const WALL_WIDTH: f32 = 0.4;
 const TILE_SIZE: f32 = 1.0;
+const ROUND_SHOT_SIZE: f32 = 0.25;
 const BRICK_COLOR: &str = "E7444A";
 
 // We base all the math on a desired time of flight that
@@ -376,9 +377,8 @@ pub fn process_picking(
                         let aim_angle = direction.angle_between(Vec3::new(-1., 0., 0.));
                         cannon.rotation = Quat::from_rotation_y(aim_angle);
 
-                        let size = 0.25;
-
-                        let vertical_offset = Vec3::new(0., (WALL_HEIGHT / 2.0) + (size / 2.0), 0.);
+                        let vertical_offset =
+                            Vec3::new(0., (WALL_HEIGHT / 2.0) + (ROUND_SHOT_SIZE / 2.0), 0.);
                         let initial = cannon.translation + vertical_offset;
 
                         info!(
@@ -387,19 +387,36 @@ pub fn process_picking(
                         );
 
                         commands.spawn((
+                            Name::new("Muzzle:Light"),
+                            Expires::after(0.05),
+                            PointLightBundle {
+                                transform: Transform::from_translation(
+                                    initial + Vec3::new(0., 1., 0.),
+                                ),
+                                point_light: PointLight {
+                                    intensity: 15000.0,
+                                    shadows_enabled: true,
+                                    ..default()
+                                },
+                                ..default()
+                            },
+                        ));
+
+                        commands.spawn((
                             Name::new("Projectile"),
                             PbrBundle {
                                 mesh: mesh.clone(),
                                 material: black.clone(),
-                                transform: Transform::from_translation(initial)
-                                    .with_scale(Vec3::new(size, size, size)),
+                                transform: Transform::from_translation(initial).with_scale(
+                                    Vec3::new(ROUND_SHOT_SIZE, ROUND_SHOT_SIZE, ROUND_SHOT_SIZE),
+                                ),
                                 ..default()
                             },
                             ColliderMassProperties::Mass(mass),
                             RigidBody::Dynamic,
                             ActiveEvents::COLLISION_EVENTS,
                             RoundShot {},
-                            Collider::ball(size / 2.),
+                            Collider::ball(ROUND_SHOT_SIZE / 2.),
                             Velocity {
                                 linvel: velocity,
                                 angvel: Vec3::ZERO,
