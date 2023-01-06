@@ -430,26 +430,16 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut _effects: ResMut<Assets<EffectAsset>>,
 ) {
-    const HALF_SIZE: f32 = 10.0;
     commands.spawn((
         Name::new("Sun"),
         DirectionalLightBundle {
             directional_light: DirectionalLight {
                 illuminance: 5000.,
-                shadow_projection: OrthographicProjection {
-                    left: -HALF_SIZE,
-                    right: HALF_SIZE,
-                    bottom: -HALF_SIZE,
-                    top: HALF_SIZE,
-                    near: -10.0 * HALF_SIZE,
-                    far: 10.0 * HALF_SIZE,
-                    ..default()
-                },
                 shadows_enabled: true,
                 ..default()
             },
             transform: Transform {
-                translation: Vec3::new(0.0, 2.0, 0.0),
+                translation: Vec3::new(-6.0, 20.0, 0.0),
                 rotation: Quat::from_rotation_x(-PI / 4.),
                 ..default()
             },
