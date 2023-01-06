@@ -9,6 +9,13 @@ use std::f32::consts::*;
 
 pub type Vec2Usize = (usize, usize);
 
+const STRUCTURE_HEIGHT: f32 = 0.6;
+const GROUND_DEPTH: f32 = 0.2;
+const WALL_HEIGHT: f32 = 0.6;
+const WALL_WIDTH: f32 = 0.4;
+const TILE_SIZE: f32 = 1.0;
+const BRICK_COLOR: &str = "E7444A";
+
 pub struct Player(u32);
 
 pub enum Phase {
@@ -213,15 +220,20 @@ fn check_collisions(
     mut contact_force_events: EventReader<ContactForceEvent>,
     mut effects: ResMut<Assets<EffectAsset>>,
     transforms: Query<&Transform>,
+    names: Query<&Name>,
 ) {
     for collision_event in collision_events.iter() {
-        info!("collision: {:?}", collision_event);
-
         match collision_event {
-            CollisionEvent::Started(_structure, projectile, _) => {
+            CollisionEvent::Started(structure, projectile, _) => {
                 let showtime = transforms.get(*projectile).expect("No collision entity");
 
                 commands.entity(*projectile).despawn();
+
+                info!(
+                    "collision: with={:?} projectile={:?}",
+                    names.get(*structure).map(|s| s.as_str()),
+                    names.get(*projectile).map(|s| s.as_str())
+                );
 
                 let mut colors = Gradient::new();
                 colors.add_key(0.0, Vec4::new(4.0, 4.0, 4.0, 1.0));
@@ -288,7 +300,7 @@ fn check_collisions(
                         ));
                     });
             }
-            CollisionEvent::Stopped(_, _, _) => {}
+            CollisionEvent::Stopped(_, _, _) => debug!("collision: {:?}", collision_event),
         }
     }
 
@@ -346,11 +358,6 @@ pub fn process_picking(
                         let velocity = (direction * horizontal_velocity)
                             + Vec3::new(0., vertical_velocity, 0.);
 
-                        info!(
-                            %distance, %velocity,
-                            "firing {} -> {}", cannon_name.as_str(), target_name.as_str(),
-                        );
-
                         // This may need an offset to account for the mesh.
                         // TODO Animate?
                         let aim_angle = direction.angle_between(Vec3::new(-1., 0., 0.));
@@ -358,12 +365,20 @@ pub fn process_picking(
 
                         let size = 0.25;
 
+                        let vertical_offset = Vec3::new(0., (WALL_HEIGHT / 2.0) + (size / 2.0), 0.);
+                        let initial = cannon.translation + vertical_offset;
+
+                        info!(
+                            %distance, %velocity,
+                            "firing {} -> {} (initial={})", cannon_name.as_str(), target_name.as_str(), initial
+                        );
+
                         commands.spawn((
                             Name::new("Projectile"),
                             PbrBundle {
                                 mesh: mesh.clone(),
                                 material: black.clone(),
-                                transform: Transform::from_translation(cannon.translation)
+                                transform: Transform::from_translation(initial)
                                     .with_scale(Vec3::new(size, size, size)),
                                 ..default()
                             },
@@ -415,8 +430,8 @@ impl<T> From<&Around<Option<&Option<T>>>> for ConnectingWall {
         match value {
             Around((_, _, _), (_, _, Some(Some(_))), (_, Some(Some(_)), _)) => Self::Corner(0), // Bottom Right
             Around((_, _, _), (Some(Some(_)), _, _), (_, Some(Some(_)), _)) => Self::Corner(90), // Bottom Left
-            Around((_, Some(Some(_)), _), (_, _, Some(Some(_))), (_, _, _)) => Self::Corner(180), // Top Right
-            Around((_, Some(Some(_)), _), (Some(Some(_)), _, _), (_, _, _)) => Self::Corner(270), // Top Left
+            Around((_, Some(Some(_)), _), (Some(Some(_)), _, _), (_, _, _)) => Self::Corner(180), // Top Left
+            Around((_, Some(Some(_)), _), (_, _, Some(Some(_))), (_, _, _)) => Self::Corner(270), // Top Right
             Around(_, (Some(Some(_)), _, Some(Some(_))), _) => Self::Horizontal,
             Around((_, Some(Some(_)), _), (_, _, _), (_, Some(Some(_)), _)) => Self::Vertical,
             Around((_, _, _), (_, _, _), (_, _, _)) => Self::Unknown,
@@ -424,11 +439,20 @@ impl<T> From<&Around<Option<&Option<T>>>> for ConnectingWall {
     }
 }
 
+#[allow(dead_code)]
+enum QuickCamera {
+    Normal,
+    TopDown,
+    CloseSide,
+}
+
+const DEFAULT_QUICK_CAMERA: QuickCamera = QuickCamera::Normal;
+
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut _effects: ResMut<Assets<EffectAsset>>,
+    asset_server: Res<AssetServer>,
 ) {
     commands.spawn((
         Name::new("Sun"),
@@ -449,7 +473,15 @@ fn setup(
 
     commands.spawn((
         Camera3dBundle {
-            transform: Transform::from_xyz(0.0, 18.0, -32.0).looking_at(Vec3::ZERO, Vec3::Y),
+            transform: match DEFAULT_QUICK_CAMERA {
+                QuickCamera::Normal => {
+                    Transform::from_xyz(0.0, 18.0, -32.0).looking_at(Vec3::ZERO, Vec3::Y)
+                }
+                QuickCamera::TopDown => Transform::from_xyz(-12., 12., -12.)
+                    .looking_at(Vec3::new(-12., 1., -12.), Vec3::Z),
+                QuickCamera::CloseSide => Transform::from_xyz(-10., 1., -18.)
+                    .looking_at(Vec3::new(-10., 1., -8.), Vec3::Y),
+            },
             ..default()
         },
         PickingCameraBundle::default(),
@@ -459,11 +491,16 @@ fn setup(
 
     // Rigid body ground
     commands.spawn((
+        Name::new("Ground"),
         TransformBundle::from(Transform::from_xyz(0.0, 0.0, 0.0)),
         Collider::cuboid(20., 0.1, 20.),
     ));
 
-    let ground = meshes.add(Mesh::from(shape::Box::new(0.95, 0.2, 0.95)));
+    let ground = meshes.add(Mesh::from(shape::Box::new(
+        TILE_SIZE * 0.95,
+        GROUND_DEPTH,
+        TILE_SIZE * 0.95,
+    )));
 
     let dirt = materials.add(StandardMaterial {
         base_color: Color::BEIGE,
@@ -500,10 +537,10 @@ fn setup(
         ));
     }
 
-    let structure = meshes.add(Mesh::from(shape::Box::new(0.6, 0.6, 0.6)));
+    let structure = meshes.add(Mesh::from(shape::Box::new(0.6, STRUCTURE_HEIGHT, 0.6)));
 
     let wall_simple = materials.add(StandardMaterial {
-        base_color: Color::FUCHSIA,
+        base_color: Color::hex(BRICK_COLOR).expect("BRICK_COLOR"),
         perceptual_roughness: 1.0,
         ..default()
     });
@@ -514,10 +551,17 @@ fn setup(
         ..default()
     });
 
-    let wall_unknown = meshes.add(Mesh::from(shape::Box::new(0.90, 0.90, 0.90)));
-    let wall_corner = meshes.add(Mesh::from(shape::Box::new(0.4, 0.6, 0.4)));
-    let wall_v = meshes.add(Mesh::from(shape::Box::new(0.4, 0.6, 1.0)));
-    let wall_h = meshes.add(Mesh::from(shape::Box::new(1.0, 0.6, 0.4)));
+    let wall_unknown = meshes.add(Mesh::from(shape::Box::new(TILE_SIZE, TILE_SIZE, TILE_SIZE)));
+    let wall_v = meshes.add(Mesh::from(shape::Box::new(
+        WALL_WIDTH,
+        WALL_HEIGHT,
+        TILE_SIZE,
+    )));
+    let wall_h = meshes.add(Mesh::from(shape::Box::new(
+        TILE_SIZE,
+        WALL_HEIGHT,
+        WALL_WIDTH,
+    )));
 
     for (grid, position, item) in terrain.structure_layer.layout() {
         if let Some(item) = item {
@@ -529,43 +573,97 @@ fn setup(
 
                     info!("{:?} {:?}", grid, connecting);
 
-                    commands.spawn((
-                        Name::new(format!("Wall{:?}", &grid)),
-                        PbrBundle {
-                            mesh: match connecting {
-                                ConnectingWall::Corner(0) => wall_corner.clone(),
-                                ConnectingWall::Corner(90) => wall_corner.clone(),
-                                ConnectingWall::Corner(180) => wall_corner.clone(),
-                                ConnectingWall::Corner(270) => wall_corner.clone(),
-                                ConnectingWall::Vertical => wall_v.clone(),
-                                ConnectingWall::Horizontal => wall_h.clone(),
-                                ConnectingWall::Isolated => wall_unknown.clone(),
-                                _ => wall_unknown.clone(),
+                    commands
+                        .spawn((
+                            Name::new(format!("Wall{:?}", &grid)),
+                            SpatialBundle {
+                                transform: Transform::from_xyz(
+                                    position.x,
+                                    (WALL_HEIGHT / 2.) + (GROUND_DEPTH / 2.),
+                                    position.y,
+                                ),
+                                ..default()
                             },
-                            material: wall_simple.clone(),
-                            transform: Transform::from_xyz(position.x, 0.4, position.y),
-                            ..default()
-                        },
-                        PickableBundle::default(),
-                        // We need to be able to exclude this from colliding with its own projectiles.
-                        // Collider::cuboid(0.3, 0.3, 0.3),
-                        wall.clone(),
-                    ));
+                            PickableBundle::default(),
+                            // We need to be able to exclude this from colliding with its own projectiles.
+                            // Collider::cuboid(0.3, 0.3, 0.3),
+                            wall.clone(),
+                        ))
+                        .with_children(|parent| match connecting {
+                            ConnectingWall::Isolated => {
+                                parent.spawn(PbrBundle {
+                                    mesh: wall_unknown.clone(),
+                                    material: wall_simple.clone(),
+                                    ..default()
+                                });
+                            }
+                            ConnectingWall::Vertical => {
+                                parent.spawn(PbrBundle {
+                                    mesh: wall_v.clone(),
+                                    material: wall_simple.clone(),
+                                    ..default()
+                                });
+                            }
+                            ConnectingWall::Horizontal => {
+                                parent.spawn(PbrBundle {
+                                    mesh: wall_h.clone(),
+                                    material: wall_simple.clone(),
+                                    ..default()
+                                });
+                            }
+                            ConnectingWall::Corner(angle) => {
+                                parent.spawn(SceneBundle {
+                                    scene: asset_server.load("corner.glb#Scene0"),
+                                    transform: Transform::from_rotation(Quat::from_rotation_y(
+                                        -(angle as f32 * PI / 180.),
+                                    )),
+                                    ..default()
+                                });
+                            }
+                            _ => {
+                                parent.spawn(PbrBundle {
+                                    mesh: wall_unknown.clone(),
+                                    ..default()
+                                });
+                            }
+                        });
                 }
                 Structure::Cannon(cannon) => {
-                    commands.spawn((
-                        Name::new(format!("Cannon{:?}", &grid)),
-                        PbrBundle {
-                            mesh: structure.clone(),
-                            material: cannon_simple.clone(),
-                            transform: Transform::from_xyz(position.x, 0.4, position.y),
-                            ..default()
-                        },
-                        PickableBundle::default(),
-                        // We need to be able to exclude this from colliding with its own projectiles.
-                        // Collider::cuboid(0.3, 0.3, 0.3),
-                        cannon.clone(),
-                    ));
+                    commands
+                        .spawn((
+                            Name::new(format!("Cannon{:?}", &grid)),
+                            SpatialBundle {
+                                transform: Transform::from_xyz(
+                                    position.x,
+                                    STRUCTURE_HEIGHT / 2.0,
+                                    position.y,
+                                ),
+                                ..default()
+                            },
+                            /*
+                            PbrBundle {
+                                mesh: structure.clone(),
+                                material: cannon_simple.clone(),
+                                transform: Transform::from_xyz(
+                                    position.x,
+                                    STRUCTURE_HEIGHT / 2.0,
+                                    position.y,
+                                ),
+                                ..default()
+                            },
+                            */
+                            PickableBundle::default(),
+                            // We need to be able to exclude this from colliding with its own projectiles.
+                            // Collider::cuboid(0.3, 0.3, 0.3),
+                            cannon.clone(),
+                        ))
+                        .with_children(|parent| {
+                            parent.spawn(SceneBundle {
+                                scene: asset_server.load("cannon.glb#Scene0"),
+                                transform: Transform::from_rotation(Quat::from_rotation_y(0.)),
+                                ..default()
+                            });
+                        });
                 }
             }
         }
