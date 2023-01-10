@@ -23,18 +23,6 @@ const MAXIMUM_HORIZONTAL_DISTANCE: f32 = 35.0;
 const MINIMUM_FLIGHT_TIME: f32 = 1.0;
 const GRAVITY: f32 = 9.8;
 
-#[derive(Component, Clone, Debug)]
-pub enum Player {
-    One,
-    Two,
-}
-
-pub enum Phase {
-    Extend(Player),
-    Arm(Player),
-    Target(Player),
-}
-
 #[derive(Debug)]
 pub struct WorldGeometry<T> {
     size: Vec2Usize,
@@ -132,6 +120,18 @@ where
     fn coordinates_to_index(&self, c: Vec2Usize) -> usize {
         c.1 * self.size.1 + (c.0)
     }
+}
+
+#[derive(Component, Clone, Debug)]
+pub enum Player {
+    One,
+    Two,
+}
+
+pub enum Phase {
+    Fortify(Player),
+    Arm(Player),
+    Target(Player),
 }
 
 #[derive(Component, Clone, Debug)]
@@ -359,7 +359,7 @@ pub fn process_picking(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut events: EventReader<PickingEvent>,
     targets: Query<(&Transform, &Name), Without<Cannon>>, // Conflicts below, but won't work when we add enemy cannons.
-    mut cannons: Query<(Entity, &mut Transform, &Name), With<Cannon>>,
+    mut cannons: Query<(Entity, &mut Transform, &Player, &Name), With<Cannon>>,
 ) {
     let mesh: Handle<Mesh> = meshes.add(shape::Icosphere::default().into());
 
@@ -377,7 +377,7 @@ pub fn process_picking(
                 let target = target.translation;
 
                 match cannons.iter_mut().next() {
-                    Some((_e, mut cannon, cannon_name)) => {
+                    Some((_e, mut cannon, player, cannon_name)) => {
                         let zero_y = Vec3::new(1., 0., 1.);
                         let direction = (target - cannon.translation) * zero_y;
                         let distance = direction.length();
@@ -413,7 +413,7 @@ pub fn process_picking(
 
                         info!(
                             %distance, %velocity,
-                            "firing {} -> {} (initial={})", cannon_name.as_str(), target_name.as_str(), initial
+                            "firing ({:?}) {} -> {} (initial={})", player, cannon_name.as_str(), target_name.as_str(), initial
                         );
 
                         commands.spawn((
@@ -446,6 +446,7 @@ pub fn process_picking(
                             RigidBody::Dynamic,
                             ActiveEvents::COLLISION_EVENTS,
                             RoundShot {},
+                            player.clone(),
                             Collider::ball(ROUND_SHOT_SIZE / 2.),
                             Velocity {
                                 linvel: velocity,
@@ -633,6 +634,7 @@ fn setup(
                             PickableBundle::default(),
                             Collider::cuboid(TILE_SIZE / 2., STRUCTURE_HEIGHT / 2., TILE_SIZE / 2.),
                             CollisionGroups::new(Group::all(), Group::all()),
+                            wall.player.clone(),
                             wall.clone(),
                         ))
                         .with_children(|parent| match connecting {
@@ -689,6 +691,7 @@ fn setup(
                             PickableBundle::default(),
                             CollisionGroups::new(Group::all(), Group::all()),
                             Collider::cuboid(TILE_SIZE / 2., STRUCTURE_HEIGHT / 2., TILE_SIZE / 2.),
+                            cannon.player.clone(),
                             cannon.clone(),
                         ))
                         .with_children(|parent| {
@@ -738,7 +741,7 @@ pub fn expirations(
             Some(expiration) => {
                 if timer.elapsed_seconds() > expiration {
                     // https://bevy-cheatbook.github.io/features/parent-child.html#known-pitfalls
-                    info!("expiring {:?} '{:?}'", entity, name.map(|n| n.as_str()));
+                    info!("expiring '{:?}'", name.map(|n| n.as_str()));
                     commands.entity(entity).despawn_recursive();
                 }
             }
