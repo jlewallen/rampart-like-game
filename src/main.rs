@@ -147,23 +147,11 @@ impl Default for Player {
     }
 }
 
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct ActivePlayer(Player);
 
-impl Default for ActivePlayer {
-    fn default() -> Self {
-        Self(Default::default())
-    }
-}
-
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct ActivePhase(Phase);
-
-impl Default for ActivePhase {
-    fn default() -> Self {
-        Self(Default::default())
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Phase {
@@ -341,24 +329,15 @@ fn spacebar_pressed(kbd: Res<Input<KeyCode>>) -> bool {
  */
 
 fn should_place_wall(state: Res<CurrentState<Phase>>) -> bool {
-    match &state.0 {
-        Phase::Fortify(_) => true,
-        _ => false,
-    }
+    matches!(state.0, Phase::Fortify(_))
 }
 
 fn should_place_cannon(state: Res<CurrentState<Phase>>) -> bool {
-    match &state.0 {
-        Phase::Arm(_) => true,
-        _ => false,
-    }
+    matches!(state.0, Phase::Arm(_))
 }
 
 fn should_pick_target(state: Res<CurrentState<Phase>>) -> bool {
-    match &state.0 {
-        Phase::Target(_) => true,
-        _ => false,
-    }
+    matches!(state.0, Phase::Target(_))
 }
 
 fn should_check_collisions(state: Res<CurrentState<Phase>>) -> bool {
@@ -387,7 +366,7 @@ fn check_collisions(
     for collision_event in collision_events.iter() {
         match collision_event {
             CollisionEvent::Started(first, second, _) => {
-                let (target, projectile) = (|| {
+                let (target, projectile) = {
                     if projectiles
                         .get(*first)
                         .expect("Projectile check failed")
@@ -397,7 +376,7 @@ fn check_collisions(
                     } else {
                         (first, second)
                     }
-                })();
+                };
 
                 let showtime = transforms.get(*projectile).expect("No collision entity");
 
@@ -495,24 +474,21 @@ pub fn pick_coordinates(
     targets: Query<(&Transform, &Name, &Coordinates), Without<Cannon>>,
 ) -> Option<PickedCoordinates> {
     for event in events.iter() {
-        match event {
-            PickingEvent::Clicked(e) => {
-                let (transform, target_name, coordinates) =
-                    targets.get(*e).expect("Clicked entity not found?");
+        if let PickingEvent::Clicked(e) = event {
+            let (transform, target_name, coordinates) =
+                targets.get(*e).expect("Clicked entity not found?");
 
-                info!(
-                    "pick-coordinate {:?} p={:?}",
-                    target_name.as_str(),
-                    &coordinates
-                );
+            info!(
+                "pick-coordinate {:?} p={:?}",
+                target_name.as_str(),
+                &coordinates
+            );
 
-                return Some(PickedCoordinates {
-                    name: target_name.to_string(),
-                    coordinates: coordinates.clone(),
-                    transform: transform.clone(),
-                });
-            }
-            _ => {}
+            return Some(PickedCoordinates {
+                name: target_name.to_string(),
+                coordinates: coordinates.clone(),
+                transform: *transform,
+            });
         }
     }
 
@@ -550,7 +526,7 @@ pub fn place_wall(
     info!("place-wall p={:?}", &picked);
 
     modified.send(TerrainModifiedEvent(
-        picked.coordinates.clone(),
+        picked.coordinates,
         Structure::Wall(Wall {
             player: player.0.clone(),
         }),
@@ -573,7 +549,7 @@ pub fn place_cannon(
     info!("place-cannon p={:?}", &picked);
 
     modified.send(TerrainModifiedEvent(
-        picked.coordinates.clone(),
+        picked.coordinates,
         Structure::Cannon(Cannon {
             player: player.0.clone(),
         }),
@@ -661,8 +637,8 @@ pub fn pick_target(
             commands.spawn((
                 Name::new("Projectile"),
                 PbrBundle {
-                    mesh: mesh.clone(),
-                    material: black.clone(),
+                    mesh,
+                    material: black,
                     transform: Transform::from_translation(initial).with_scale(Vec3::new(
                         ROUND_SHOT_SIZE,
                         ROUND_SHOT_SIZE,
