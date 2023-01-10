@@ -223,7 +223,7 @@ pub struct Cannon {
 }
 
 #[derive(Clone, Debug)]
-pub struct TerrainModifiedEvent(Coordinates);
+pub struct TerrainModifiedEvent(Coordinates, Structure);
 
 #[derive(Clone, Debug)]
 pub enum Structure {
@@ -364,7 +364,7 @@ fn should_check_collisions(state: Res<CurrentState<Phase>>) -> bool {
 
 fn refresh_terrain(mut modified: EventReader<TerrainModifiedEvent>, _terrain: Res<Terrain>) {
     for ev in modified.iter() {
-        info!("terrain-modified {:?}", ev.0);
+        info!("terrain-modified {:?}", ev);
     }
 }
 
@@ -514,6 +514,7 @@ pub fn pick_coordinates(
 
 pub fn progress_game(
     phase: Res<CurrentState<Phase>>,
+    mut player: ResMut<ActivePlayer>,
     mut modified: EventReader<TerrainModifiedEvent>,
     mut commands: Commands,
 ) {
@@ -521,11 +522,13 @@ pub fn progress_game(
         let before = &phase.0;
         let after = before.next();
         info!("{:?} -> {:?}", before, after);
+        *player = ActivePlayer(after.player());
         commands.insert_resource(NextState(after));
     }
 }
 
 pub fn place_wall(
+    player: Res<ActivePlayer>,
     events: EventReader<PickingEvent>,
     targets: Query<(&Transform, &Name, &Coordinates), Without<Cannon>>,
     mut modified: EventWriter<TerrainModifiedEvent>,
@@ -539,10 +542,16 @@ pub fn place_wall(
 
     info!("place-wall p={:?}", &picked);
 
-    modified.send(TerrainModifiedEvent(picked.coordinates.clone()))
+    modified.send(TerrainModifiedEvent(
+        picked.coordinates.clone(),
+        Structure::Wall(Wall {
+            player: player.0.clone(),
+        }),
+    ))
 }
 
 pub fn place_cannon(
+    player: Res<ActivePlayer>,
     events: EventReader<PickingEvent>,
     targets: Query<(&Transform, &Name, &Coordinates), Without<Cannon>>,
     mut modified: EventWriter<TerrainModifiedEvent>,
@@ -556,7 +565,12 @@ pub fn place_cannon(
 
     info!("place-cannon p={:?}", &picked);
 
-    modified.send(TerrainModifiedEvent(picked.coordinates.clone()))
+    modified.send(TerrainModifiedEvent(
+        picked.coordinates.clone(),
+        Structure::Cannon(Cannon {
+            player: player.0.clone(),
+        }),
+    ))
 }
 
 pub fn pick_target(
