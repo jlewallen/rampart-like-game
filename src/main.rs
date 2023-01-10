@@ -310,9 +310,11 @@ fn main() {
         // .add_plugin(LogDiagnosticsPlugin::default())
         .add_plugin(FrameTimeDiagnosticsPlugin::default())
         .add_startup_system(setup)
-        .add_system_set(
+        .add_system_set_to_stage(
+            CoreStage::PostUpdate,
             SystemSet::new()
                 .label("game")
+                .with_system(progress_game)
                 .with_system(refresh_terrain)
                 .with_system(check_collisions.run_if(should_check_collisions))
                 .with_system(place_wall.run_if(should_place_wall))
@@ -474,58 +476,104 @@ fn check_collisions(
     }
 }
 
-pub fn place_wall(
-    mut events: EventReader<PickingEvent>,
-    mut modified: EventWriter<TerrainModifiedEvent>,
-    targets: Query<(&Transform, &Name, &Coordinates), Without<Cannon>>, // Conflicts below, but won't work when we add enemy cannons.
-) {
-    for event in events.iter() {
-        match event {
-            PickingEvent::Clicked(e) => {
-                let (_target, target_name, coordinates) =
-                    targets.get(*e).expect("Clicked entity not found?");
-
-                info!("place-wall {:?} p={:?}", target_name.as_str(), &coordinates);
-
-                modified.send(TerrainModifiedEvent(coordinates.clone()))
-            }
-            _ => {}
-        }
-    }
+#[derive(Debug, Clone)]
+pub struct PickedCoordinates {
+    name: String,
+    coordinates: Coordinates,
+    transform: Transform,
 }
 
-pub fn place_cannon(
+pub fn pick_coordinates(
     mut events: EventReader<PickingEvent>,
-    mut modified: EventWriter<TerrainModifiedEvent>,
-    targets: Query<(&Transform, &Name, &Coordinates), Without<Cannon>>, // Conflicts below, but won't work when we add enemy cannons.
-) {
+    targets: Query<(&Transform, &Name, &Coordinates), Without<Cannon>>,
+) -> Option<PickedCoordinates> {
     for event in events.iter() {
         match event {
             PickingEvent::Clicked(e) => {
-                let (_target, target_name, coordinates) =
+                let (transform, target_name, coordinates) =
                     targets.get(*e).expect("Clicked entity not found?");
 
                 info!(
-                    "place-cannon {:?} p={:?}",
+                    "pick-coordinate {:?} p={:?}",
                     target_name.as_str(),
-                    coordinates
+                    &coordinates
                 );
 
-                modified.send(TerrainModifiedEvent(coordinates.clone()))
+                return Some(PickedCoordinates {
+                    name: target_name.to_string(),
+                    coordinates: coordinates.clone(),
+                    transform: transform.clone(),
+                });
             }
             _ => {}
         }
     }
+
+    None
+}
+
+pub fn progress_game(
+    phase: Res<CurrentState<Phase>>,
+    mut modified: EventReader<TerrainModifiedEvent>,
+    mut commands: Commands,
+) {
+    for _event in modified.iter() {
+        let before = &phase.0;
+        let after = before.next();
+        info!("{:?} -> {:?}", before, after);
+        commands.insert_resource(NextState(after));
+    }
+}
+
+pub fn place_wall(
+    events: EventReader<PickingEvent>,
+    targets: Query<(&Transform, &Name, &Coordinates), Without<Cannon>>,
+    mut modified: EventWriter<TerrainModifiedEvent>,
+) {
+    let picked = pick_coordinates(events, targets);
+    if picked.is_none() {
+        return;
+    }
+
+    let picked = picked.expect("No picked");
+
+    info!("place-wall p={:?}", &picked);
+
+    modified.send(TerrainModifiedEvent(picked.coordinates.clone()))
+}
+
+pub fn place_cannon(
+    events: EventReader<PickingEvent>,
+    targets: Query<(&Transform, &Name, &Coordinates), Without<Cannon>>,
+    mut modified: EventWriter<TerrainModifiedEvent>,
+) {
+    let picked = pick_coordinates(events, targets);
+    if picked.is_none() {
+        return;
+    }
+
+    let picked = picked.expect("No picked");
+
+    info!("place-cannon p={:?}", &picked);
+
+    modified.send(TerrainModifiedEvent(picked.coordinates.clone()))
 }
 
 pub fn pick_target(
+    events: EventReader<PickingEvent>,
+    targets: Query<(&Transform, &Name, &Coordinates), Without<Cannon>>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut events: EventReader<PickingEvent>,
-    targets: Query<(&Transform, &Name), Without<Cannon>>, // Conflicts below, but won't work when we add enemy cannons.
     mut cannons: Query<(Entity, &mut Transform, &Player, &Name), With<Cannon>>,
 ) {
+    let picked = pick_coordinates(events, targets);
+    if picked.is_none() {
+        return;
+    }
+
+    let picked = picked.expect("No picked");
+
     let mesh: Handle<Mesh> = meshes.add(shape::Icosphere::default().into());
 
     let black = materials.add(StandardMaterial {
@@ -534,96 +582,86 @@ pub fn pick_target(
         ..default()
     });
 
-    for event in events.iter() {
-        match event {
-            PickingEvent::Selection(e) => info!("selection: {:?}", e),
-            PickingEvent::Clicked(e) => {
-                let (target, target_name) = targets.get(*e).expect("Clicked entity not found?");
-                let target = target.translation;
+    let (target, target_name) = (picked.transform, picked.name);
+    let target = target.translation;
 
-                match cannons.iter_mut().next() {
-                    Some((_e, mut cannon, player, cannon_name)) => {
-                        let zero_y = Vec3::new(1., 0., 1.);
-                        let direction = (target - cannon.translation) * zero_y;
-                        let distance = direction.length();
-                        let direction = direction.normalize();
+    match cannons.iter_mut().next() {
+        Some((_e, mut cannon, player, cannon_name)) => {
+            let zero_y = Vec3::new(1., 0., 1.);
+            let direction = (target - cannon.translation) * zero_y;
+            let distance = direction.length();
+            let direction = direction.normalize();
 
-                        if distance < 1. {
-                            info!(%distance, "safety engaged");
-                            break;
-                        }
-
-                        let distance = distance - TILE_SIZE / 2.;
-                        let desired_time_of_flight =
-                            (distance / MAXIMUM_HORIZONTAL_DISTANCE) + MINIMUM_FLIGHT_TIME;
-                        // Vertical velocity to reach apex half way through.
-                        let vertical_velocity = GRAVITY * (desired_time_of_flight / 2.0);
-                        // Gotta go `distance` so however long that will take.
-                        let horizontal_velocity = distance / desired_time_of_flight;
-
-                        let mass = 20.0;
-
-                        // Final velocity is horizontal plus vertical.
-                        let velocity = (direction * horizontal_velocity)
-                            + Vec3::new(0., vertical_velocity, 0.);
-
-                        // This may need an offset to account for the mesh.
-                        // TODO Animate?
-                        let aim_angle = direction.angle_between(Vec3::new(-1., 0., 0.));
-                        cannon.rotation = Quat::from_rotation_y(aim_angle);
-
-                        let vertical_offset =
-                            Vec3::new(0., (WALL_HEIGHT / 2.0) + (ROUND_SHOT_SIZE / 2.0), 0.);
-                        let initial = cannon.translation + vertical_offset;
-
-                        info!(
-                            %distance, %velocity,
-                            "firing ({:?}) {} -> {} (initial={})", player, cannon_name.as_str(), target_name.as_str(), initial
-                        );
-
-                        commands.spawn((
-                            Name::new("Muzzle:Light"),
-                            Expires::after(0.05),
-                            PointLightBundle {
-                                transform: Transform::from_translation(
-                                    initial + Vec3::new(0., 1., 0.),
-                                ),
-                                point_light: PointLight {
-                                    intensity: 100.0,
-                                    shadows_enabled: true,
-                                    ..default()
-                                },
-                                ..default()
-                            },
-                        ));
-
-                        commands.spawn((
-                            Name::new("Projectile"),
-                            PbrBundle {
-                                mesh: mesh.clone(),
-                                material: black.clone(),
-                                transform: Transform::from_translation(initial).with_scale(
-                                    Vec3::new(ROUND_SHOT_SIZE, ROUND_SHOT_SIZE, ROUND_SHOT_SIZE),
-                                ),
-                                ..default()
-                            },
-                            ColliderMassProperties::Mass(mass),
-                            RigidBody::Dynamic,
-                            ActiveEvents::COLLISION_EVENTS,
-                            RoundShot {},
-                            player.clone(),
-                            Collider::ball(ROUND_SHOT_SIZE / 2.),
-                            Velocity {
-                                linvel: velocity,
-                                angvel: Vec3::ZERO,
-                            },
-                        ));
-                    }
-                    None => warn!("no cannons"),
-                }
+            if distance < 1. {
+                info!(%distance, "safety engaged");
+                return;
             }
-            PickingEvent::Hover(_) => {}
+
+            let distance = distance - TILE_SIZE / 2.;
+            let desired_time_of_flight =
+                (distance / MAXIMUM_HORIZONTAL_DISTANCE) + MINIMUM_FLIGHT_TIME;
+            // Vertical velocity to reach apex half way through.
+            let vertical_velocity = GRAVITY * (desired_time_of_flight / 2.0);
+            // Gotta go `distance` so however long that will take.
+            let horizontal_velocity = distance / desired_time_of_flight;
+
+            let mass = 20.0;
+
+            // Final velocity is horizontal plus vertical.
+            let velocity = (direction * horizontal_velocity) + Vec3::new(0., vertical_velocity, 0.);
+
+            // This may need an offset to account for the mesh.
+            // TODO Animate?
+            let aim_angle = direction.angle_between(Vec3::new(-1., 0., 0.));
+            cannon.rotation = Quat::from_rotation_y(aim_angle);
+
+            let vertical_offset = Vec3::new(0., (WALL_HEIGHT / 2.0) + (ROUND_SHOT_SIZE / 2.0), 0.);
+            let initial = cannon.translation + vertical_offset;
+
+            info!(
+                %distance, %velocity,
+                "firing ({:?}) {} -> {} (initial={})", player, cannon_name.as_str(), target_name.as_str(), initial
+            );
+
+            commands.spawn((
+                Name::new("Muzzle:Light"),
+                Expires::after(0.05),
+                PointLightBundle {
+                    transform: Transform::from_translation(initial + Vec3::new(0., 1., 0.)),
+                    point_light: PointLight {
+                        intensity: 100.0,
+                        shadows_enabled: true,
+                        ..default()
+                    },
+                    ..default()
+                },
+            ));
+
+            commands.spawn((
+                Name::new("Projectile"),
+                PbrBundle {
+                    mesh: mesh.clone(),
+                    material: black.clone(),
+                    transform: Transform::from_translation(initial).with_scale(Vec3::new(
+                        ROUND_SHOT_SIZE,
+                        ROUND_SHOT_SIZE,
+                        ROUND_SHOT_SIZE,
+                    )),
+                    ..default()
+                },
+                ColliderMassProperties::Mass(mass),
+                RigidBody::Dynamic,
+                ActiveEvents::COLLISION_EVENTS,
+                RoundShot {},
+                player.clone(),
+                Collider::ball(ROUND_SHOT_SIZE / 2.),
+                Velocity {
+                    linvel: velocity,
+                    angvel: Vec3::ZERO,
+                },
+            ));
         }
+        None => warn!("no cannons"),
     }
 }
 
