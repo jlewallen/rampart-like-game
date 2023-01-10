@@ -23,7 +23,11 @@ const MAXIMUM_HORIZONTAL_DISTANCE: f32 = 35.0;
 const MINIMUM_FLIGHT_TIME: f32 = 1.0;
 const GRAVITY: f32 = 9.8;
 
-pub struct Player(u32);
+#[derive(Component, Clone, Debug)]
+pub enum Player {
+    One,
+    Two,
+}
 
 pub enum Phase {
     Extend(Player),
@@ -144,10 +148,14 @@ impl Default for Ground {
 }
 
 #[derive(Component, Clone, Debug)]
-pub struct Wall {}
+pub struct Wall {
+    pub player: Player,
+}
 
 #[derive(Component, Clone, Debug)]
-pub struct Cannon {}
+pub struct Cannon {
+    pub player: Player,
+}
 
 #[derive(Clone, Debug)]
 pub enum Structure {
@@ -167,6 +175,22 @@ impl Terrain {
             ground_layer: WorldGeometry::new(size),
             structure_layer: WorldGeometry::new(size),
         }
+    }
+
+    pub fn create_castle(&mut self, center: Vec2Usize, size: Vec2Usize, player: Player) {
+        let (x0, y0) = (center.0 - size.0 / 2, center.1 - size.1 / 2);
+        let (x1, y1) = (center.0 + size.0 / 2, center.1 + size.1 / 2);
+
+        self.structure_layer.outline(
+            (x0, y0),
+            (x1, y1),
+            Some(Structure::Wall(Wall {
+                player: player.clone(),
+            })),
+        );
+
+        self.structure_layer
+            .set(center, Some(Structure::Cannon(Cannon { player })));
     }
 }
 
@@ -440,15 +464,8 @@ pub fn process_picking(
 pub fn load_terrain() -> Terrain {
     let mut terrain = Terrain::new((32, 32));
     terrain.ground_layer.set((4, 4), Ground::Grass);
-
-    terrain
-        .structure_layer
-        .outline((2, 2), (6, 6), Some(Structure::Wall(Wall {})));
-
-    terrain
-        .structure_layer
-        .set((4, 4), Some(Structure::Cannon(Cannon {})));
-
+    terrain.create_castle((4, 4), (4, 4), Player::One);
+    terrain.create_castle((26, 26), (4, 4), Player::Two);
     terrain
 }
 
