@@ -333,6 +333,13 @@ fn main() {
         .run();
 }
 
+/// Condition checking if spacebar is pressed
+/*
+fn spacebar_pressed(kbd: Res<Input<KeyCode>>) -> bool {
+    kbd.pressed(KeyCode::Space)
+}
+ */
+
 fn should_place_wall(state: Res<CurrentState<Phase>>) -> bool {
     match &state.0 {
         Phase::Fortify(_) => true,
