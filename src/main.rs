@@ -5,6 +5,7 @@ use bevy_mod_picking::{
     PickingCameraBundle, PickingEvent,
 };
 use bevy_rapier3d::prelude::*;
+use iyes_loopless::prelude::*;
 use std::f32::consts::*;
 
 pub type Vec2Usize = (usize, usize);
@@ -122,16 +123,80 @@ where
     }
 }
 
-#[derive(Component, Clone, Debug)]
+#[derive(Component, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Coordinates(Vec2Usize);
+
+#[derive(Component, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Player {
     One,
     Two,
 }
 
+impl Player {
+    pub fn next(&self) -> Self {
+        match self {
+            Player::One => Player::Two,
+            Player::Two => Player::One,
+        }
+    }
+}
+
+impl Default for Player {
+    fn default() -> Player {
+        Player::One
+    }
+}
+
+#[derive(Resource)]
+pub struct ActivePlayer(Player);
+
+impl Default for ActivePlayer {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
+#[derive(Resource)]
+pub struct ActivePhase(Phase);
+
+impl Default for ActivePhase {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Phase {
     Fortify(Player),
     Arm(Player),
     Target(Player),
+}
+
+impl Default for Phase {
+    fn default() -> Self {
+        Phase::Fortify(Player::default())
+    }
+}
+
+impl Phase {
+    pub fn next(&self) -> Self {
+        match self {
+            Self::Fortify(Player::One) => Self::Arm(Player::One),
+            Self::Arm(Player::One) => Self::Fortify(Player::Two),
+            Self::Fortify(Player::Two) => Self::Arm(Player::Two),
+            Self::Arm(Player::Two) => Self::Target(Player::One),
+            Self::Target(Player::One) => Self::Target(Player::Two),
+            Self::Target(Player::Two) => Self::Fortify(Player::One),
+        }
+    }
+
+    pub fn player(&self) -> Player {
+        match self {
+            Self::Fortify(player) => player.clone(),
+            Self::Arm(player) => player.clone(),
+            Self::Target(player) => player.clone(),
+        }
+    }
 }
 
 #[derive(Component, Clone, Debug)]
@@ -158,15 +223,24 @@ pub struct Cannon {
 }
 
 #[derive(Clone, Debug)]
+pub struct TerrainModifiedEvent(Coordinates);
+
+#[derive(Clone, Debug)]
 pub enum Structure {
     Wall(Wall),
     Cannon(Cannon),
 }
 
-#[derive(Debug)]
+#[derive(Resource)]
 pub struct Terrain {
     ground_layer: WorldGeometry<Ground>,
     structure_layer: WorldGeometry<Option<Structure>>,
+}
+
+impl FromWorld for Terrain {
+    fn from_world(_world: &mut World) -> Self {
+        load_terrain()
+    }
 }
 
 impl Terrain {
@@ -236,13 +310,60 @@ fn main() {
         // .add_plugin(LogDiagnosticsPlugin::default())
         .add_plugin(FrameTimeDiagnosticsPlugin::default())
         .add_startup_system(setup)
-        .add_system_to_stage(CoreStage::PostUpdate, check_collisions)
-        .add_system_to_stage(CoreStage::PostUpdate, process_picking)
+        .add_system_set(
+            SystemSet::new()
+                .label("game")
+                .with_system(refresh_terrain)
+                .with_system(check_collisions.run_if(should_check_collisions))
+                .with_system(place_wall.run_if(should_place_wall))
+                .with_system(place_cannon.run_if(should_place_cannon))
+                .with_system(pick_target.run_if(should_pick_target)),
+        )
         .add_system_to_stage(CoreStage::PostUpdate, expirations)
         .add_system_to_stage(CoreStage::PostUpdate, expanding)
         .add_system(bevy::window::close_on_esc)
+        .add_loopless_state(Phase::default())
+        .add_event::<TerrainModifiedEvent>()
         .insert_resource(ClearColor(Color::hex("152238").unwrap()))
+        .init_resource::<Terrain>()
+        .init_resource::<ActivePlayer>()
+        .init_resource::<ActivePhase>()
         .run();
+}
+
+fn should_place_wall(state: Res<CurrentState<Phase>>) -> bool {
+    match &state.0 {
+        Phase::Fortify(_) => true,
+        _ => false,
+    }
+}
+
+fn should_place_cannon(state: Res<CurrentState<Phase>>) -> bool {
+    match &state.0 {
+        Phase::Arm(_) => true,
+        _ => false,
+    }
+}
+
+fn should_pick_target(state: Res<CurrentState<Phase>>) -> bool {
+    match &state.0 {
+        Phase::Target(_) => true,
+        _ => false,
+    }
+}
+
+fn should_check_collisions(state: Res<CurrentState<Phase>>) -> bool {
+    match &state.0 {
+        Phase::Fortify(_) => true,
+        Phase::Arm(_) => true,
+        Phase::Target(_) => true,
+    }
+}
+
+fn refresh_terrain(mut modified: EventReader<TerrainModifiedEvent>, _terrain: Res<Terrain>) {
+    for ev in modified.iter() {
+        info!("terrain-modified {:?}", ev.0);
+    }
 }
 
 fn check_collisions(
@@ -353,7 +474,51 @@ fn check_collisions(
     }
 }
 
-pub fn process_picking(
+pub fn place_wall(
+    mut events: EventReader<PickingEvent>,
+    mut modified: EventWriter<TerrainModifiedEvent>,
+    targets: Query<(&Transform, &Name, &Coordinates), Without<Cannon>>, // Conflicts below, but won't work when we add enemy cannons.
+) {
+    for event in events.iter() {
+        match event {
+            PickingEvent::Clicked(e) => {
+                let (_target, target_name, coordinates) =
+                    targets.get(*e).expect("Clicked entity not found?");
+
+                info!("place-wall {:?} p={:?}", target_name.as_str(), &coordinates);
+
+                modified.send(TerrainModifiedEvent(coordinates.clone()))
+            }
+            _ => {}
+        }
+    }
+}
+
+pub fn place_cannon(
+    mut events: EventReader<PickingEvent>,
+    mut modified: EventWriter<TerrainModifiedEvent>,
+    targets: Query<(&Transform, &Name, &Coordinates), Without<Cannon>>, // Conflicts below, but won't work when we add enemy cannons.
+) {
+    for event in events.iter() {
+        match event {
+            PickingEvent::Clicked(e) => {
+                let (_target, target_name, coordinates) =
+                    targets.get(*e).expect("Clicked entity not found?");
+
+                info!(
+                    "place-cannon {:?} p={:?}",
+                    target_name.as_str(),
+                    coordinates
+                );
+
+                modified.send(TerrainModifiedEvent(coordinates.clone()))
+            }
+            _ => {}
+        }
+    }
+}
+
+pub fn pick_target(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -506,6 +671,7 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    terrain: Res<Terrain>,
     asset_server: Res<AssetServer>,
 ) {
     commands.spawn((
@@ -540,8 +706,6 @@ fn setup(
         },
         PickingCameraBundle::default(),
     ));
-
-    let terrain = load_terrain();
 
     // Rigid body ground
     commands.spawn((
@@ -589,6 +753,7 @@ fn setup(
                 ..default()
             },
             PickableBundle::default(),
+            Coordinates(grid),
         ));
     }
 
@@ -634,6 +799,7 @@ fn setup(
                             PickableBundle::default(),
                             Collider::cuboid(TILE_SIZE / 2., STRUCTURE_HEIGHT / 2., TILE_SIZE / 2.),
                             CollisionGroups::new(Group::all(), Group::all()),
+                            Coordinates(grid),
                             wall.player.clone(),
                             wall.clone(),
                         ))
@@ -691,6 +857,7 @@ fn setup(
                             PickableBundle::default(),
                             CollisionGroups::new(Group::all(), Group::all()),
                             Collider::cuboid(TILE_SIZE / 2., STRUCTURE_HEIGHT / 2., TILE_SIZE / 2.),
+                            Coordinates(grid),
                             cannon.player.clone(),
                             cannon.clone(),
                         ))
