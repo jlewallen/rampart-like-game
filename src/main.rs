@@ -203,11 +203,13 @@ impl Default for Ground {
 #[derive(Component, Clone, Debug)]
 pub struct Wall {
     pub player: Player,
+    pub entity: Option<Entity>,
 }
 
 #[derive(Component, Clone, Debug)]
 pub struct Cannon {
     pub player: Player,
+    pub entity: Option<Entity>,
 }
 
 #[derive(Clone, Debug)]
@@ -248,11 +250,17 @@ impl Terrain {
             (x1, y1),
             Some(Structure::Wall(Wall {
                 player: player.clone(),
+                entity: None,
             })),
         );
 
-        self.structure_layer
-            .set(center, Some(Structure::Cannon(Cannon { player })));
+        self.structure_layer.set(
+            center,
+            Some(Structure::Cannon(Cannon {
+                player,
+                entity: None,
+            })),
+        );
     }
 }
 
@@ -348,9 +356,16 @@ fn should_check_collisions(state: Res<CurrentState<Phase>>) -> bool {
     }
 }
 
-fn refresh_terrain(mut modified: EventReader<TerrainModifiedEvent>, _terrain: Res<Terrain>) {
+fn refresh_terrain(mut modified: EventReader<TerrainModifiedEvent>, mut terrain: ResMut<Terrain>) {
     for ev in modified.iter() {
         info!("terrain-modified {:?}", ev);
+
+        let position = ev.0 .0;
+        let structure = ev.1.clone();
+
+        // let entity = create_structure(commands, )
+
+        terrain.structure_layer.set(position, Some(structure));
     }
 }
 
@@ -529,6 +544,7 @@ pub fn place_wall(
         picked.coordinates,
         Structure::Wall(Wall {
             player: player.0.clone(),
+            entity: None,
         }),
     ))
 }
@@ -552,6 +568,7 @@ pub fn place_cannon(
         picked.coordinates,
         Structure::Cannon(Cannon {
             player: player.0.clone(),
+            entity: None,
         }),
     ))
 }
@@ -702,6 +719,113 @@ enum QuickCamera {
 
 const DEFAULT_QUICK_CAMERA: QuickCamera = QuickCamera::Normal;
 
+fn create_structure(
+    commands: &mut Commands,
+    terrain: &Res<Terrain>,
+    asset_server: &Res<AssetServer>,
+    grid: Vec2Usize,
+    position: &Vec2,
+    item: &Structure,
+    wall_simple: &Handle<StandardMaterial>,
+    wall_unknown: &Handle<Mesh>,
+    wall_h: &Handle<Mesh>,
+    wall_v: &Handle<Mesh>,
+) {
+    match item {
+        Structure::Wall(wall) => {
+            let around = &terrain.structure_layer.around(grid);
+
+            let connecting: ConnectingWall = around.into();
+
+            info!("{:?} {:?}", grid, connecting);
+
+            commands
+                .spawn((
+                    Name::new(format!("Wall{:?}", &grid)),
+                    SpatialBundle {
+                        transform: Transform::from_xyz(
+                            position.x,
+                            (WALL_HEIGHT / 2.) + (GROUND_DEPTH / 2.),
+                            position.y,
+                        ),
+                        ..default()
+                    },
+                    PickableBundle::default(),
+                    Collider::cuboid(TILE_SIZE / 2., STRUCTURE_HEIGHT / 2., TILE_SIZE / 2.),
+                    CollisionGroups::new(Group::all(), Group::all()),
+                    Coordinates(grid),
+                    wall.player.clone(),
+                    wall.clone(),
+                ))
+                .with_children(|parent| match connecting {
+                    ConnectingWall::Isolated => {
+                        parent.spawn(PbrBundle {
+                            mesh: wall_unknown.clone(),
+                            material: wall_simple.clone(),
+                            ..default()
+                        });
+                    }
+                    ConnectingWall::Vertical => {
+                        parent.spawn(PbrBundle {
+                            mesh: wall_v.clone(),
+                            material: wall_simple.clone(),
+                            ..default()
+                        });
+                    }
+                    ConnectingWall::Horizontal => {
+                        parent.spawn(PbrBundle {
+                            mesh: wall_h.clone(),
+                            material: wall_simple.clone(),
+                            ..default()
+                        });
+                    }
+                    ConnectingWall::Corner(angle) => {
+                        parent.spawn(SceneBundle {
+                            scene: asset_server.load("corner.glb#Scene0"),
+                            transform: Transform::from_rotation(Quat::from_rotation_y(
+                                -(angle as f32 * PI / 180.),
+                            )),
+                            ..default()
+                        });
+                    }
+                    _ => {
+                        parent.spawn(PbrBundle {
+                            mesh: wall_unknown.clone(),
+                            ..default()
+                        });
+                    }
+                });
+        }
+        Structure::Cannon(cannon) => {
+            commands
+                .spawn((
+                    Name::new(format!("Cannon{:?}", &grid)),
+                    SpatialBundle {
+                        transform: Transform::from_xyz(
+                            position.x,
+                            STRUCTURE_HEIGHT / 2.0,
+                            position.y,
+                        ),
+                        ..default()
+                    },
+                    PickableBundle::default(),
+                    CollisionGroups::new(Group::all(), Group::all()),
+                    Collider::cuboid(TILE_SIZE / 2., STRUCTURE_HEIGHT / 2., TILE_SIZE / 2.),
+                    Coordinates(grid),
+                    cannon.player.clone(),
+                    cannon.clone(),
+                ))
+                .with_children(|parent| {
+                    parent.spawn(SceneBundle {
+                        scene: asset_server.load("cannon.glb#Scene0"),
+                        transform: Transform::from_rotation(Quat::from_rotation_y(0.)),
+                        ..default()
+                    });
+                });
+        }
+    }
+}
+
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -797,7 +921,6 @@ fn setup(
         perceptual_roughness: 1.0,
         ..default()
     });
-
     let wall_unknown = meshes.add(Mesh::from(shape::Box::new(TILE_SIZE, TILE_SIZE, TILE_SIZE)));
     let wall_v = meshes.add(Mesh::from(shape::Box::new(
         WALL_WIDTH,
@@ -812,99 +935,18 @@ fn setup(
 
     for (grid, position, item) in terrain.structure_layer.layout() {
         if let Some(item) = item {
-            match item {
-                Structure::Wall(wall) => {
-                    let around = &terrain.structure_layer.around(grid);
-
-                    let connecting: ConnectingWall = around.into();
-
-                    info!("{:?} {:?}", grid, connecting);
-
-                    commands
-                        .spawn((
-                            Name::new(format!("Wall{:?}", &grid)),
-                            SpatialBundle {
-                                transform: Transform::from_xyz(
-                                    position.x,
-                                    (WALL_HEIGHT / 2.) + (GROUND_DEPTH / 2.),
-                                    position.y,
-                                ),
-                                ..default()
-                            },
-                            PickableBundle::default(),
-                            Collider::cuboid(TILE_SIZE / 2., STRUCTURE_HEIGHT / 2., TILE_SIZE / 2.),
-                            CollisionGroups::new(Group::all(), Group::all()),
-                            Coordinates(grid),
-                            wall.player.clone(),
-                            wall.clone(),
-                        ))
-                        .with_children(|parent| match connecting {
-                            ConnectingWall::Isolated => {
-                                parent.spawn(PbrBundle {
-                                    mesh: wall_unknown.clone(),
-                                    material: wall_simple.clone(),
-                                    ..default()
-                                });
-                            }
-                            ConnectingWall::Vertical => {
-                                parent.spawn(PbrBundle {
-                                    mesh: wall_v.clone(),
-                                    material: wall_simple.clone(),
-                                    ..default()
-                                });
-                            }
-                            ConnectingWall::Horizontal => {
-                                parent.spawn(PbrBundle {
-                                    mesh: wall_h.clone(),
-                                    material: wall_simple.clone(),
-                                    ..default()
-                                });
-                            }
-                            ConnectingWall::Corner(angle) => {
-                                parent.spawn(SceneBundle {
-                                    scene: asset_server.load("corner.glb#Scene0"),
-                                    transform: Transform::from_rotation(Quat::from_rotation_y(
-                                        -(angle as f32 * PI / 180.),
-                                    )),
-                                    ..default()
-                                });
-                            }
-                            _ => {
-                                parent.spawn(PbrBundle {
-                                    mesh: wall_unknown.clone(),
-                                    ..default()
-                                });
-                            }
-                        });
-                }
-                Structure::Cannon(cannon) => {
-                    commands
-                        .spawn((
-                            Name::new(format!("Cannon{:?}", &grid)),
-                            SpatialBundle {
-                                transform: Transform::from_xyz(
-                                    position.x,
-                                    STRUCTURE_HEIGHT / 2.0,
-                                    position.y,
-                                ),
-                                ..default()
-                            },
-                            PickableBundle::default(),
-                            CollisionGroups::new(Group::all(), Group::all()),
-                            Collider::cuboid(TILE_SIZE / 2., STRUCTURE_HEIGHT / 2., TILE_SIZE / 2.),
-                            Coordinates(grid),
-                            cannon.player.clone(),
-                            cannon.clone(),
-                        ))
-                        .with_children(|parent| {
-                            parent.spawn(SceneBundle {
-                                scene: asset_server.load("cannon.glb#Scene0"),
-                                transform: Transform::from_rotation(Quat::from_rotation_y(0.)),
-                                ..default()
-                            });
-                        });
-                }
-            }
+            create_structure(
+                &mut commands,
+                &terrain,
+                &asset_server,
+                grid,
+                &position,
+                item,
+                &wall_simple,
+                &wall_unknown,
+                &wall_h,
+                &wall_v,
+            )
         }
     }
 }
