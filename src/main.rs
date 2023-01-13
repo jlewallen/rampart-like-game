@@ -121,6 +121,10 @@ where
     fn coordinates_to_index(&self, c: Vec2Usize) -> usize {
         c.1 * self.size.1 + (c.0)
     }
+
+    pub fn grid_position(&self, grid: Vec2Usize) -> Vec2 {
+        self.index_to_coordindates(self.coordinates_to_index(grid))
+    }
 }
 
 #[derive(Component, Clone, Debug, PartialEq, Eq, Hash)]
@@ -305,6 +309,7 @@ fn main() {
         // .add_plugin(RapierDebugRenderPlugin::default())
         // .add_plugin(LogDiagnosticsPlugin::default())
         .add_plugin(FrameTimeDiagnosticsPlugin::default())
+        .add_startup_system_to_stage(StartupStage::PreStartup, load_structures)
         .add_startup_system(setup)
         .add_system_set_to_stage(
             CoreStage::PostUpdate,
@@ -356,16 +361,29 @@ fn should_check_collisions(state: Res<CurrentState<Phase>>) -> bool {
     }
 }
 
-fn refresh_terrain(mut modified: EventReader<TerrainModifiedEvent>, mut terrain: ResMut<Terrain>) {
+fn refresh_terrain(
+    mut commands: Commands,
+    mut modified: EventReader<TerrainModifiedEvent>,
+    mut terrain: ResMut<Terrain>,
+    structures: Res<Structures>,
+) {
     for ev in modified.iter() {
         info!("terrain-modified {:?}", ev);
 
-        let position = ev.0 .0;
+        let grid = ev.0 .0;
         let structure = ev.1.clone();
+        let position = terrain.structure_layer.grid_position(grid);
 
-        // let entity = create_structure(commands, )
+        terrain.structure_layer.set(grid, Some(structure.clone()));
 
-        terrain.structure_layer.set(position, Some(structure));
+        let _entity = create_structure(
+            &mut commands,
+            &terrain,
+            grid,
+            &position,
+            &structure,
+            &structures,
+        );
     }
 }
 
@@ -719,17 +737,56 @@ enum QuickCamera {
 
 const DEFAULT_QUICK_CAMERA: QuickCamera = QuickCamera::Normal;
 
+#[derive(Resource)]
+pub struct Structures {
+    simple: Handle<StandardMaterial>,
+    unknown: Handle<Mesh>,
+    h: Handle<Mesh>,
+    v: Handle<Mesh>,
+    corner: Handle<Scene>,
+    cannon: Handle<Scene>,
+}
+
+pub fn load_structures(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
+) {
+    let simple = materials.add(StandardMaterial {
+        base_color: Color::hex(BRICK_COLOR).expect("BRICK_COLOR"),
+        perceptual_roughness: 1.0,
+        ..default()
+    });
+    let unknown = meshes.add(Mesh::from(shape::Box::new(TILE_SIZE, TILE_SIZE, TILE_SIZE)));
+    let v = meshes.add(Mesh::from(shape::Box::new(
+        WALL_WIDTH,
+        WALL_HEIGHT,
+        TILE_SIZE,
+    )));
+    let h = meshes.add(Mesh::from(shape::Box::new(
+        TILE_SIZE,
+        WALL_HEIGHT,
+        WALL_WIDTH,
+    )));
+
+    commands.insert_resource(Structures {
+        simple,
+        unknown,
+        h,
+        v,
+        corner: asset_server.load("corner.glb#Scene0"),
+        cannon: asset_server.load("cannon.glb#Scene0"),
+    })
+}
+
 fn create_structure(
     commands: &mut Commands,
-    terrain: &Res<Terrain>,
-    asset_server: &Res<AssetServer>,
+    terrain: &Terrain,
     grid: Vec2Usize,
     position: &Vec2,
     item: &Structure,
-    wall_simple: &Handle<StandardMaterial>,
-    wall_unknown: &Handle<Mesh>,
-    wall_h: &Handle<Mesh>,
-    wall_v: &Handle<Mesh>,
+    structures: &Res<Structures>,
 ) {
     match item {
         Structure::Wall(wall) => {
@@ -760,28 +817,28 @@ fn create_structure(
                 .with_children(|parent| match connecting {
                     ConnectingWall::Isolated => {
                         parent.spawn(PbrBundle {
-                            mesh: wall_unknown.clone(),
-                            material: wall_simple.clone(),
+                            mesh: structures.unknown.clone(),
+                            material: structures.simple.clone(),
                             ..default()
                         });
                     }
                     ConnectingWall::Vertical => {
                         parent.spawn(PbrBundle {
-                            mesh: wall_v.clone(),
-                            material: wall_simple.clone(),
+                            mesh: structures.v.clone(),
+                            material: structures.simple.clone(),
                             ..default()
                         });
                     }
                     ConnectingWall::Horizontal => {
                         parent.spawn(PbrBundle {
-                            mesh: wall_h.clone(),
-                            material: wall_simple.clone(),
+                            mesh: structures.h.clone(),
+                            material: structures.simple.clone(),
                             ..default()
                         });
                     }
                     ConnectingWall::Corner(angle) => {
                         parent.spawn(SceneBundle {
-                            scene: asset_server.load("corner.glb#Scene0"),
+                            scene: structures.corner.clone(),
                             transform: Transform::from_rotation(Quat::from_rotation_y(
                                 -(angle as f32 * PI / 180.),
                             )),
@@ -790,7 +847,7 @@ fn create_structure(
                     }
                     _ => {
                         parent.spawn(PbrBundle {
-                            mesh: wall_unknown.clone(),
+                            mesh: structures.unknown.clone(),
                             ..default()
                         });
                     }
@@ -817,7 +874,7 @@ fn create_structure(
                 ))
                 .with_children(|parent| {
                     parent.spawn(SceneBundle {
-                        scene: asset_server.load("cannon.glb#Scene0"),
+                        scene: structures.cannon.clone(),
                         transform: Transform::from_rotation(Quat::from_rotation_y(0.)),
                         ..default()
                     });
@@ -831,7 +888,7 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     terrain: Res<Terrain>,
-    asset_server: Res<AssetServer>,
+    structures: Res<Structures>,
 ) {
     commands.spawn((
         Name::new("Sun"),
@@ -916,37 +973,9 @@ fn setup(
         ));
     }
 
-    let wall_simple = materials.add(StandardMaterial {
-        base_color: Color::hex(BRICK_COLOR).expect("BRICK_COLOR"),
-        perceptual_roughness: 1.0,
-        ..default()
-    });
-    let wall_unknown = meshes.add(Mesh::from(shape::Box::new(TILE_SIZE, TILE_SIZE, TILE_SIZE)));
-    let wall_v = meshes.add(Mesh::from(shape::Box::new(
-        WALL_WIDTH,
-        WALL_HEIGHT,
-        TILE_SIZE,
-    )));
-    let wall_h = meshes.add(Mesh::from(shape::Box::new(
-        TILE_SIZE,
-        WALL_HEIGHT,
-        WALL_WIDTH,
-    )));
-
     for (grid, position, item) in terrain.structure_layer.layout() {
         if let Some(item) = item {
-            create_structure(
-                &mut commands,
-                &terrain,
-                &asset_server,
-                grid,
-                &position,
-                item,
-                &wall_simple,
-                &wall_unknown,
-                &wall_h,
-                &wall_v,
-            )
+            create_structure(&mut commands, &terrain, grid, &position, item, &structures)
         }
     }
 }
