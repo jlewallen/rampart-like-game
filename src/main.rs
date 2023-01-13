@@ -107,6 +107,10 @@ where
         Around::center(c).map(&|c| self.get(*c))
     }
 
+    pub fn grid_position(&self, grid: Vec2Usize) -> Vec2 {
+        self.index_to_coordindates(self.coordinates_to_index(grid))
+    }
+
     fn index_to_grid(&self, index: usize) -> Vec2Usize {
         (index % self.size.0, index / self.size.1)
     }
@@ -120,10 +124,6 @@ where
 
     fn coordinates_to_index(&self, c: Vec2Usize) -> usize {
         c.1 * self.size.1 + (c.0)
-    }
-
-    pub fn grid_position(&self, grid: Vec2Usize) -> Vec2 {
-        self.index_to_coordindates(self.coordinates_to_index(grid))
     }
 }
 
@@ -334,12 +334,12 @@ fn main() {
         .run();
 }
 
-/// Condition checking if spacebar is pressed
 /*
+/// Condition checking if spacebar is pressed
 fn spacebar_pressed(kbd: Res<Input<KeyCode>>) -> bool {
     kbd.pressed(KeyCode::Space)
 }
- */
+*/
 
 fn should_place_wall(state: Res<CurrentState<Phase>>) -> bool {
     matches!(state.0, Phase::Fortify(_))
@@ -374,9 +374,15 @@ fn refresh_terrain(
         let structure = ev.1.clone();
         let position = terrain.structure_layer.grid_position(grid);
 
+        let existing = terrain.structure_layer.get(grid);
+
+        if existing.expect("Out of bounds").is_some() {
+            return;
+        }
+
         terrain.structure_layer.set(grid, Some(structure.clone()));
 
-        let _entity = create_structure(
+        create_structure(
             &mut commands,
             &terrain,
             grid,
