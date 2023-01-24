@@ -8,8 +8,6 @@ use bevy_rapier3d::prelude::*;
 use iyes_loopless::prelude::*;
 use std::f32::consts::*;
 
-pub type Vec2Usize = (usize, usize);
-
 const STRUCTURE_HEIGHT: f32 = 0.6;
 const GROUND_DEPTH: f32 = 0.2;
 const WALL_HEIGHT: f32 = 0.6;
@@ -23,6 +21,8 @@ const BRICK_COLOR: &str = "E7444A";
 const MAXIMUM_HORIZONTAL_DISTANCE: f32 = 35.0;
 const MINIMUM_FLIGHT_TIME: f32 = 1.0;
 const GRAVITY: f32 = 9.8;
+
+pub type Vec2Usize = (usize, usize);
 
 #[derive(Debug)]
 pub struct WorldGeometry<T> {
@@ -217,9 +217,6 @@ pub struct Cannon {
 }
 
 #[derive(Clone, Debug)]
-pub struct TerrainModifiedEvent(Coordinates, Structure);
-
-#[derive(Clone, Debug)]
 pub enum Structure {
     Wall(Wall),
     Cannon(Cannon),
@@ -231,9 +228,24 @@ pub struct Terrain {
     structure_layer: WorldGeometry<Option<Structure>>,
 }
 
+#[derive(Resource)]
+pub struct EntityLayer(WorldGeometry<Option<Vec<Entity>>>);
+
+impl EntityLayer {
+    pub fn new(size: Vec2Usize) -> Self {
+        Self(WorldGeometry::new(size))
+    }
+}
+
+impl FromWorld for EntityLayer {
+    fn from_world(_world: &mut World) -> Self {
+        Self::new((32, 32))
+    }
+}
+
 impl FromWorld for Terrain {
     fn from_world(_world: &mut World) -> Self {
-        load_terrain()
+        load_terrain((32, 32))
     }
 }
 
@@ -268,12 +280,23 @@ impl Terrain {
     }
 }
 
+pub fn load_terrain(size: Vec2Usize) -> Terrain {
+    let mut terrain = Terrain::new(size);
+    terrain.ground_layer.set((4, 4), Ground::Grass);
+    terrain.create_castle((4, 4), (4, 4), Player::One);
+    terrain.create_castle((26, 26), (4, 4), Player::Two);
+    terrain
+}
+
 pub trait Projectile {}
 
 #[derive(Component, Clone, Debug)]
 pub struct RoundShot {}
 
 impl Projectile for RoundShot {}
+
+#[derive(Clone, Debug)]
+pub struct TerrainModifiedEvent(Coordinates, Structure);
 
 fn main() {
     App::new()
@@ -331,6 +354,7 @@ fn main() {
         .init_resource::<Terrain>()
         .init_resource::<ActivePlayer>()
         .init_resource::<ActivePhase>()
+        .init_resource::<EntityLayer>()
         .run();
 }
 
@@ -358,38 +382,6 @@ fn should_check_collisions(state: Res<CurrentState<Phase>>) -> bool {
         Phase::Fortify(_) => true,
         Phase::Arm(_) => true,
         Phase::Target(_) => true,
-    }
-}
-
-fn refresh_terrain(
-    mut commands: Commands,
-    mut modified: EventReader<TerrainModifiedEvent>,
-    mut terrain: ResMut<Terrain>,
-    structures: Res<Structures>,
-) {
-    for ev in modified.iter() {
-        info!("terrain-modified {:?}", ev);
-
-        let grid = ev.0 .0;
-        let structure = ev.1.clone();
-        let position = terrain.structure_layer.grid_position(grid);
-
-        let existing = terrain.structure_layer.get(grid);
-
-        if existing.expect("Out of bounds").is_some() {
-            return;
-        }
-
-        terrain.structure_layer.set(grid, Some(structure.clone()));
-
-        create_structure(
-            &mut commands,
-            &terrain,
-            grid,
-            &position,
-            &structure,
-            &structures,
-        );
     }
 }
 
@@ -549,6 +541,40 @@ pub fn progress_game(
     }
 }
 
+fn refresh_terrain(
+    mut commands: Commands,
+    mut modified: EventReader<TerrainModifiedEvent>,
+    mut terrain: ResMut<Terrain>,
+    mut entities: ResMut<EntityLayer>,
+    structures: Res<Structures>,
+) {
+    for ev in modified.iter() {
+        info!("terrain-modified {:?}", ev);
+
+        let grid = ev.0 .0;
+        let structure = ev.1.clone();
+        let position = terrain.structure_layer.grid_position(grid);
+        let existing = terrain.structure_layer.get(grid).expect("Out of bounds");
+        if existing.is_some() {
+            return;
+        }
+
+        let _around = terrain.structure_layer.around(grid);
+
+        terrain.structure_layer.set(grid, Some(structure.clone()));
+
+        create_structure(
+            &mut commands,
+            &terrain,
+            grid,
+            &position,
+            &structure,
+            &structures,
+            &mut entities,
+        );
+    }
+}
+
 pub fn place_wall(
     player: Res<ActivePlayer>,
     events: EventReader<PickingEvent>,
@@ -703,14 +729,6 @@ pub fn pick_target(
     }
 }
 
-pub fn load_terrain() -> Terrain {
-    let mut terrain = Terrain::new((32, 32));
-    terrain.ground_layer.set((4, 4), Ground::Grass);
-    terrain.create_castle((4, 4), (4, 4), Player::One);
-    terrain.create_castle((26, 26), (4, 4), Player::Two);
-    terrain
-}
-
 #[derive(Debug)]
 pub enum ConnectingWall {
     Isolated,
@@ -793,6 +811,7 @@ fn create_structure(
     position: &Vec2,
     item: &Structure,
     structures: &Res<Structures>,
+    entities: &mut ResMut<EntityLayer>,
 ) {
     match item {
         Structure::Wall(wall) => {
@@ -800,7 +819,7 @@ fn create_structure(
 
             let connecting: ConnectingWall = around.into();
 
-            info!("{:?} {:?}", grid, connecting);
+            info!("create-structure {:?} {:?}", grid, connecting);
 
             commands
                 .spawn((
@@ -893,6 +912,7 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut entities: ResMut<EntityLayer>,
     terrain: Res<Terrain>,
     structures: Res<Structures>,
 ) {
@@ -981,7 +1001,15 @@ fn setup(
 
     for (grid, position, item) in terrain.structure_layer.layout() {
         if let Some(item) = item {
-            create_structure(&mut commands, &terrain, grid, &position, item, &structures)
+            create_structure(
+                &mut commands,
+                &terrain,
+                grid,
+                &position,
+                item,
+                &structures,
+                &mut entities,
+            )
         }
     }
 }
