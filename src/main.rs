@@ -1,11 +1,11 @@
 use bevy::{diagnostic::FrameTimeDiagnosticsPlugin, prelude::*, window::WindowResolution};
 use bevy_hanabi::prelude::*;
 use bevy_mod_picking::{
-    CustomHighlightPlugin, DefaultHighlighting, DefaultPickingPlugins, PickableBundle,
-    PickingCameraBundle, PickingEvent,
+    events::{Click, Pointer},
+    highlight::{DefaultHighlightingPlugin, GlobalHighlight, HighlightPlugin},
+    DefaultPickingPlugins, PickableBundle,
 };
 use bevy_rapier3d::prelude::*;
-// use iyes_loopless::prelude::*;
 use std::f32::consts::*;
 
 const STRUCTURE_HEIGHT: f32 = 0.6;
@@ -304,6 +304,8 @@ impl Projectile for RoundShot {}
 #[derive(Clone, Debug)]
 pub struct TerrainModifiedEvent(Coordinates, Structure);
 
+impl Event for TerrainModifiedEvent {}
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -314,39 +316,45 @@ fn main() {
             }),
             ..default()
         }))
+        // .add_plugin(DefaultHighlightingPlugin)
+        .add_plugin(HanabiPlugin)
+        /*
         .add_plugins(
             DefaultPickingPlugins
-                .set(CustomHighlightPlugin::<StandardMaterial> {
-                    highlighting_default: |mut assets| DefaultHighlighting {
+                .set(HighlightPlugin::<StandardMaterial> {
+                    highlighting_default: |mut assets| GlobalHighlight {
                         hovered: assets.add(Color::rgb(0.35, 0.35, 0.35).into()),
                         pressed: assets.add(Color::rgb(0.35, 0.75, 0.35).into()),
                         selected: assets.add(Color::rgb(0.35, 0.35, 0.75).into()),
                     },
                 })
-                .set(CustomHighlightPlugin::<ColorMaterial> {
-                    highlighting_default: |mut assets| DefaultHighlighting {
+                .set(HighlightPlugin::<ColorMaterial> {
+                    highlighting_default: |mut assets| GlobalHighlight {
                         hovered: assets.add(Color::rgb(0.35, 0.35, 0.35).into()),
                         pressed: assets.add(Color::rgb(0.35, 0.75, 0.35).into()),
                         selected: assets.add(Color::rgb(0.35, 0.35, 0.75).into()),
                     },
                 }),
         )
-        .add_plugin(HanabiPlugin)
+        */
         .add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
         // .add_plugin(RapierDebugRenderPlugin::default())
         // .add_plugin(LogDiagnosticsPlugin::default())
         .add_plugin(FrameTimeDiagnosticsPlugin::default())
-        .add_startup_system(load_structures.in_base_set(StartupSet::PreStartup))
+        // .add_startup_system(load_structures.in_base_set(StartupSet::PreStartup))
+        .add_systems(PreStartup, load_structures)
         // .add_startup_system_to_stage(StartupSet::PreStartup, load_structures)
         .add_startup_system(setup)
-        .add_systems((progress_game,))
-        .add_systems((refresh_terrain,))
-        .add_systems((check_collisions.run_if(should_check_collisions),))
-        .add_systems((place_wall.run_if(should_place_wall),))
-        .add_systems((place_cannon.run_if(should_place_cannon),))
-        .add_systems((pick_target.run_if(should_pick_target),))
-        .add_system(expirations.in_base_set(CoreSet::PostUpdate))
-        .add_system(expanding.in_base_set(CoreSet::PostUpdate))
+        .add_systems(Startup, progress_game) // TODO
+        .add_systems(Startup, refresh_terrain)
+        .add_systems(Update, (check_collisions.run_if(should_check_collisions),))
+        // Resources for these won't exist until later.
+        // .add_systems(Update, (place_wall.run_if(should_place_wall),))
+        // .add_systems(Update, (place_cannon.run_if(should_place_cannon),))
+        // .add_systems(Update, (pick_target.run_if(should_pick_target),))
+        .add_systems(PostUpdate, expirations)
+        // .add_system(expanding.in_base_set(CoreSet::PostUpdate))
+        .add_systems(PostUpdate, expanding)
         .add_system(bevy::window::close_on_esc)
         // .add_loopless_state(Phase::default())
         .add_state::<Phase>()
@@ -367,19 +375,19 @@ fn spacebar_pressed(kbd: Res<Input<KeyCode>>) -> bool {
 */
 
 fn should_place_wall(state: Res<State<Phase>>) -> bool {
-    matches!(state.0, Phase::Fortify)
+    matches!(state.get(), Phase::Fortify)
 }
 
 fn should_place_cannon(state: Res<State<Phase>>) -> bool {
-    matches!(state.0, Phase::Arm)
+    matches!(state.get(), Phase::Arm)
 }
 
 fn should_pick_target(state: Res<State<Phase>>) -> bool {
-    matches!(state.0, Phase::Target)
+    matches!(state.get(), Phase::Target)
 }
 
 fn should_check_collisions(state: Res<State<Phase>>) -> bool {
-    match &state.0 {
+    match &state.get() {
         Phase::Fortify => true,
         Phase::Arm => true,
         Phase::Target => true,
@@ -431,25 +439,36 @@ fn check_collisions(
                 sizes.add_key(0.3, Vec2::splat(0.1));
                 sizes.add_key(1.0, Vec2::splat(0.0));
 
+                // Create a new expression module
+                let module = Module::default();
+
                 // TODO Leaking?
                 let effect = effects.add(
-                    EffectAsset {
-                        name: "Firework".to_string(),
-                        capacity: 32768,
-                        spawner: Spawner::once(500.0.into(), true),
-                        ..Default::default()
-                    }
-                    .init(InitPositionSphereModifier {
-                        dimension: ShapeDimension::Volume,
-                        radius: 0.25,
-                        // speed: 70_f32.into(),
-                        center: Vec3::ZERO,
-                    })
-                    // .init(ParticleLifetimeModifier { lifetime: 0.3 })
-                    .update(LinearDragModifier { drag: 5. })
-                    .update(AccelModifier::constant(Vec3::new(0., -8., 0.)))
-                    .render(ColorOverLifetimeModifier { gradient: colors })
-                    .render(SizeOverLifetimeModifier { gradient: sizes }),
+                    EffectAsset::new(32768, Spawner::once(500.0.into(), true), module)
+                        /*
+                                            {
+                                                name: "Firework".to_string(),
+                                                // capacity: 32768,
+                                                spawner: Spawner::once(500.0.into(), true),
+                                                // ..Default::default()
+                                            }
+                        */
+                                            /*
+                                            .init(SetPositionSphereModifier {
+                                                dimension: ShapeDimension::Volume,
+                                                // radius: 0.25,
+                                                // speed: 70_f32.into(),
+                                                // center: Vec3::ZERO,
+                                            })
+                                            */
+                        // .init(ParticleLifetimeModifier { lifetime: 0.3 })
+                        // .update(LinearDragModifier { drag: 5. })
+                        // .update(AccelModifier::constant(Vec3::new(0., -8., 0.)))
+                        .render(ColorOverLifetimeModifier { gradient: colors })
+                        .render(SizeOverLifetimeModifier {
+                            gradient: sizes,
+                            screen_space_size: todo!(),
+                        }),
                 );
 
                 commands
@@ -499,11 +518,12 @@ pub struct PickedCoordinates {
     transform: Transform,
 }
 
-pub fn pick_coordinates(
-    mut events: EventReader<PickingEvent>,
+fn pick_coordinates(
+    mut events: EventReader<Pointer<Click>>,
     targets: Query<(&Transform, &Name, &Coordinates), Without<Cannon>>,
 ) -> Option<PickedCoordinates> {
     for event in events.iter() {
+        /*
         if let PickingEvent::Clicked(e) = event {
             let (transform, target_name, coordinates) =
                 targets.get(*e).expect("Clicked entity not found?");
@@ -520,6 +540,7 @@ pub fn pick_coordinates(
                 transform: *transform,
             });
         }
+        */
     }
 
     None
@@ -576,7 +597,7 @@ fn refresh_terrain(
 
 pub fn place_wall(
     player: Res<ActivePlayer>,
-    events: EventReader<PickingEvent>,
+    events: EventReader<Pointer<Click>>,
     targets: Query<(&Transform, &Name, &Coordinates), Without<Cannon>>,
     mut modified: EventWriter<TerrainModifiedEvent>,
 ) {
@@ -600,7 +621,7 @@ pub fn place_wall(
 
 pub fn place_cannon(
     player: Res<ActivePlayer>,
-    events: EventReader<PickingEvent>,
+    events: EventReader<Pointer<Click>>,
     targets: Query<(&Transform, &Name, &Coordinates), Without<Cannon>>,
     mut modified: EventWriter<TerrainModifiedEvent>,
 ) {
@@ -623,7 +644,7 @@ pub fn place_cannon(
 }
 
 pub fn pick_target(
-    events: EventReader<PickingEvent>,
+    events: EventReader<Pointer<Click>>,
     targets: Query<(&Transform, &Name, &Coordinates), Without<Cannon>>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -945,7 +966,7 @@ fn setup(
             },
             ..default()
         },
-        PickingCameraBundle::default(),
+        // PickingCameraBundle::default(),
     ));
 
     // Rigid body ground
