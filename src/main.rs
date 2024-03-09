@@ -341,20 +341,10 @@ fn main() {
         .add_startup_system(setup)
         .add_systems((progress_game,))
         .add_systems((refresh_terrain,))
-        /*
-        .add_systems((check_collisions,).run_if(should_check_collisions))
-        .add_system_set_to_stage(
-            CoreSet::PostUpdate,
-            SystemSet::new()
-                .label("game")
-                .with_system(progress_game)
-                .with_system(refresh_terrain)
-                .with_system(check_collisions.run_if(should_check_collisions))
-                .with_system(place_wall.run_if(should_place_wall))
-                .with_system(place_cannon.run_if(should_place_cannon))
-                .with_system(pick_target.run_if(should_pick_target)),
-        )
-        */
+        .add_systems((check_collisions.run_if(should_check_collisions),))
+        .add_systems((place_wall.run_if(should_place_wall),))
+        .add_systems((place_cannon.run_if(should_place_cannon),))
+        .add_systems((pick_target.run_if(should_pick_target),))
         .add_system(expirations.in_base_set(CoreSet::PostUpdate))
         .add_system(expanding.in_base_set(CoreSet::PostUpdate))
         .add_system(bevy::window::close_on_esc)
@@ -536,15 +526,15 @@ pub fn pick_coordinates(
 }
 
 pub fn progress_game(
-    mut phase: ResMut<NextState<Phase>>,
-    mut player: ResMut<ActivePlayer>,
+    mut _phase: ResMut<NextState<Phase>>,
+    mut _player: ResMut<ActivePlayer>,
     mut modified: EventReader<TerrainModifiedEvent>,
-    mut commands: Commands,
+    mut _commands: Commands,
 ) {
     for _event in modified.iter() {
-        let before = &phase.0.as_ref().unwrap();
-        let after = before.next();
-        info!("{:?} -> {:?}", before, after);
+        // let before = &phase.0.as_ref().unwrap();
+        // let after = before.next();
+        // info!("{:?} -> {:?}", before, after);
         // *player = ActivePlayer(after.player());
         // commands.insert_resource(NextState(after));
     }

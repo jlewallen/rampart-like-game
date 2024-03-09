@@ -1648,7 +1648,6 @@ dependencies = [
  "bevy_hanabi",
  "bevy_mod_picking",
  "bevy_rapier3d",
- "iyes_loopless",
 ]
 
 [[package]]
@@ -2658,18 +2657,6 @@ name = "itoa"
 version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1a46d1a171d865aa5f83f92695765caa047a9b4cbae2cbf37dbd613a793fd4c"
-
-[[package]]
-name = "iyes_loopless"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c47fd2cbdb1d7f295c25e6bfccfd78a84b6eef3055bc9f01b34ae861721b01ee"
-dependencies = [
- "bevy_app 0.9.1",
- "bevy_ecs 0.9.1",
- "bevy_time 0.9.1",
- "bevy_utils 0.9.1",
-]
 
 [[package]]
 name = "jni"
