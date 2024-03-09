@@ -811,7 +811,7 @@ fn create_structure(
     position: &Vec2,
     item: &Structure,
     structures: &Res<Structures>,
-    entities: &mut ResMut<EntityLayer>,
+    _entities: &mut ResMut<EntityLayer>,
 ) {
     match item {
         Structure::Wall(wall) => {
