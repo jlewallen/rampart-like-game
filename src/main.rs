@@ -1,11 +1,11 @@
-use bevy::{diagnostic::FrameTimeDiagnosticsPlugin, prelude::*, window::PresentMode};
+use bevy::{diagnostic::FrameTimeDiagnosticsPlugin, prelude::*, window::WindowResolution};
 use bevy_hanabi::prelude::*;
 use bevy_mod_picking::{
     CustomHighlightPlugin, DefaultHighlighting, DefaultPickingPlugins, PickableBundle,
     PickingCameraBundle, PickingEvent,
 };
 use bevy_rapier3d::prelude::*;
-use iyes_loopless::prelude::*;
+// use iyes_loopless::prelude::*;
 use std::f32::consts::*;
 
 const STRUCTURE_HEIGHT: f32 = 0.6;
@@ -157,20 +157,25 @@ pub struct ActivePlayer(Player);
 #[derive(Resource, Default)]
 pub struct ActivePhase(Phase);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, States)]
 pub enum Phase {
-    Fortify(Player),
-    Arm(Player),
-    Target(Player),
+    Fortify, // (Player),
+    Arm,     // (Player),
+    Target,  // (Player),
 }
 
 impl Default for Phase {
     fn default() -> Self {
-        Phase::Fortify(Player::default())
+        Phase::Fortify // (Player::default())
     }
 }
 
 impl Phase {
+    pub fn next(&self) -> Self {
+        todo!()
+    }
+
+    /*
     pub fn next(&self) -> Self {
         match self {
             Self::Fortify(Player::One) => Self::Arm(Player::One),
@@ -189,6 +194,7 @@ impl Phase {
             Self::Target(player) => player.clone(),
         }
     }
+    */
 }
 
 #[derive(Component, Clone, Debug)]
@@ -301,13 +307,11 @@ pub struct TerrainModifiedEvent(Coordinates, Structure);
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
-            window: WindowDescriptor {
+            primary_window: Some(Window {
                 title: "Castle".to_string(),
-                width: 1024. + 256. + 32.,
-                height: 768.,
-                present_mode: PresentMode::AutoNoVsync,
+                resolution: WindowResolution::new(1024. + 256. + 32., 768.0),
                 ..default()
-            },
+            }),
             ..default()
         }))
         .add_plugins(
@@ -332,10 +336,15 @@ fn main() {
         // .add_plugin(RapierDebugRenderPlugin::default())
         // .add_plugin(LogDiagnosticsPlugin::default())
         .add_plugin(FrameTimeDiagnosticsPlugin::default())
-        .add_startup_system_to_stage(StartupStage::PreStartup, load_structures)
+        .add_startup_system(load_structures.in_base_set(StartupSet::PreStartup))
+        // .add_startup_system_to_stage(StartupSet::PreStartup, load_structures)
         .add_startup_system(setup)
+        .add_systems((progress_game,))
+        .add_systems((refresh_terrain,))
+        /*
+        .add_systems((check_collisions,).run_if(should_check_collisions))
         .add_system_set_to_stage(
-            CoreStage::PostUpdate,
+            CoreSet::PostUpdate,
             SystemSet::new()
                 .label("game")
                 .with_system(progress_game)
@@ -345,10 +354,12 @@ fn main() {
                 .with_system(place_cannon.run_if(should_place_cannon))
                 .with_system(pick_target.run_if(should_pick_target)),
         )
-        .add_system_to_stage(CoreStage::PostUpdate, expirations)
-        .add_system_to_stage(CoreStage::PostUpdate, expanding)
+        */
+        .add_system(expirations.in_base_set(CoreSet::PostUpdate))
+        .add_system(expanding.in_base_set(CoreSet::PostUpdate))
         .add_system(bevy::window::close_on_esc)
-        .add_loopless_state(Phase::default())
+        // .add_loopless_state(Phase::default())
+        .add_state::<Phase>()
         .add_event::<TerrainModifiedEvent>()
         .insert_resource(ClearColor(Color::hex("152238").unwrap()))
         .init_resource::<Terrain>()
@@ -365,23 +376,23 @@ fn spacebar_pressed(kbd: Res<Input<KeyCode>>) -> bool {
 }
 */
 
-fn should_place_wall(state: Res<CurrentState<Phase>>) -> bool {
-    matches!(state.0, Phase::Fortify(_))
+fn should_place_wall(state: Res<State<Phase>>) -> bool {
+    matches!(state.0, Phase::Fortify)
 }
 
-fn should_place_cannon(state: Res<CurrentState<Phase>>) -> bool {
-    matches!(state.0, Phase::Arm(_))
+fn should_place_cannon(state: Res<State<Phase>>) -> bool {
+    matches!(state.0, Phase::Arm)
 }
 
-fn should_pick_target(state: Res<CurrentState<Phase>>) -> bool {
-    matches!(state.0, Phase::Target(_))
+fn should_pick_target(state: Res<State<Phase>>) -> bool {
+    matches!(state.0, Phase::Target)
 }
 
-fn should_check_collisions(state: Res<CurrentState<Phase>>) -> bool {
+fn should_check_collisions(state: Res<State<Phase>>) -> bool {
     match &state.0 {
-        Phase::Fortify(_) => true,
-        Phase::Arm(_) => true,
-        Phase::Target(_) => true,
+        Phase::Fortify => true,
+        Phase::Arm => true,
+        Phase::Target => true,
     }
 }
 
@@ -438,17 +449,15 @@ fn check_collisions(
                         spawner: Spawner::once(500.0.into(), true),
                         ..Default::default()
                     }
-                    .init(PositionSphereModifier {
+                    .init(InitPositionSphereModifier {
                         dimension: ShapeDimension::Volume,
                         radius: 0.25,
-                        speed: 70_f32.into(),
+                        // speed: 70_f32.into(),
                         center: Vec3::ZERO,
                     })
-                    .init(ParticleLifetimeModifier { lifetime: 0.3 })
+                    // .init(ParticleLifetimeModifier { lifetime: 0.3 })
                     .update(LinearDragModifier { drag: 5. })
-                    .update(AccelModifier {
-                        accel: Vec3::new(0., -8., 0.),
-                    })
+                    .update(AccelModifier::constant(Vec3::new(0., -8., 0.)))
                     .render(ColorOverLifetimeModifier { gradient: colors })
                     .render(SizeOverLifetimeModifier { gradient: sizes }),
                 );
@@ -527,17 +536,17 @@ pub fn pick_coordinates(
 }
 
 pub fn progress_game(
-    phase: Res<CurrentState<Phase>>,
+    mut phase: ResMut<NextState<Phase>>,
     mut player: ResMut<ActivePlayer>,
     mut modified: EventReader<TerrainModifiedEvent>,
     mut commands: Commands,
 ) {
     for _event in modified.iter() {
-        let before = &phase.0;
+        let before = &phase.0.as_ref().unwrap();
         let after = before.next();
         info!("{:?} -> {:?}", before, after);
-        *player = ActivePlayer(after.player());
-        commands.insert_resource(NextState(after));
+        // *player = ActivePlayer(after.player());
+        // commands.insert_resource(NextState(after));
     }
 }
 
@@ -638,7 +647,7 @@ pub fn pick_target(
 
     let picked = picked.expect("No picked");
 
-    let mesh: Handle<Mesh> = meshes.add(shape::Icosphere::default().into());
+    let mesh: Handle<Mesh> = meshes.add(shape::Icosphere::default().try_into().unwrap());
 
     let black = materials.add(StandardMaterial {
         base_color: Color::BLACK,
