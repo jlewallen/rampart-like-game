@@ -1,4 +1,8 @@
-use bevy::{diagnostic::FrameTimeDiagnosticsPlugin, prelude::*, window::WindowResolution};
+use bevy::{
+    diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
+    prelude::*,
+    window::WindowResolution,
+};
 use bevy_hanabi::prelude::*;
 use bevy_mod_picking::{
     events::{Click, Pointer},
@@ -316,35 +320,33 @@ fn main() {
             }),
             ..default()
         }))
-        // .add_plugin(DefaultHighlightingPlugin)
-        .add_plugin(HanabiPlugin)
-        /*
+        .add_plugins(HanabiPlugin)
         .add_plugins(
-            DefaultPickingPlugins
-                .set(HighlightPlugin::<StandardMaterial> {
-                    highlighting_default: |mut assets| GlobalHighlight {
-                        hovered: assets.add(Color::rgb(0.35, 0.35, 0.35).into()),
-                        pressed: assets.add(Color::rgb(0.35, 0.75, 0.35).into()),
-                        selected: assets.add(Color::rgb(0.35, 0.35, 0.75).into()),
-                    },
-                })
-                .set(HighlightPlugin::<ColorMaterial> {
-                    highlighting_default: |mut assets| GlobalHighlight {
-                        hovered: assets.add(Color::rgb(0.35, 0.35, 0.35).into()),
-                        pressed: assets.add(Color::rgb(0.35, 0.75, 0.35).into()),
-                        selected: assets.add(Color::rgb(0.35, 0.35, 0.75).into()),
-                    },
-                }),
+            DefaultPickingPlugins, /*
+                                   .set(HighlightPlugin::<StandardMaterial> {
+                                       highlighting_default: |mut assets| GlobalHighlight {
+                                           hovered: assets.add(Color::rgb(0.35, 0.35, 0.35).into()),
+                                           pressed: assets.add(Color::rgb(0.35, 0.75, 0.35).into()),
+                                           selected: assets.add(Color::rgb(0.35, 0.35, 0.75).into()),
+                                       },
+                                   })
+                                   .set(HighlightPlugin::<ColorMaterial> {
+                                       highlighting_default: |mut assets| GlobalHighlight {
+                                           hovered: assets.add(Color::rgb(0.35, 0.35, 0.35).into()),
+                                           pressed: assets.add(Color::rgb(0.35, 0.75, 0.35).into()),
+                                           selected: assets.add(Color::rgb(0.35, 0.35, 0.75).into()),
+                                       },
+                                   }),
+                                   */
         )
-        */
-        .add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
-        // .add_plugin(RapierDebugRenderPlugin::default())
-        // .add_plugin(LogDiagnosticsPlugin::default())
-        .add_plugin(FrameTimeDiagnosticsPlugin::default())
+        .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
+        .add_plugins(RapierDebugRenderPlugin::default())
+        .add_plugins(LogDiagnosticsPlugin::default())
+        .add_plugins(FrameTimeDiagnosticsPlugin::default())
         // .add_startup_system(load_structures.in_base_set(StartupSet::PreStartup))
         .add_systems(PreStartup, load_structures)
         // .add_startup_system_to_stage(StartupSet::PreStartup, load_structures)
-        .add_startup_system(setup)
+        .add_systems(Startup, setup)
         .add_systems(Startup, progress_game) // TODO
         .add_systems(Startup, refresh_terrain)
         .add_systems(Update, (check_collisions.run_if(should_check_collisions),))
@@ -355,7 +357,7 @@ fn main() {
         .add_systems(PostUpdate, expirations)
         // .add_system(expanding.in_base_set(CoreSet::PostUpdate))
         .add_systems(PostUpdate, expanding)
-        .add_system(bevy::window::close_on_esc)
+        .add_systems(Update, bevy::window::close_on_esc)
         // .add_loopless_state(Phase::default())
         .add_state::<Phase>()
         .add_event::<TerrainModifiedEvent>()
