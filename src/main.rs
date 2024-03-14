@@ -1,13 +1,15 @@
 use bevy::{
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
+    math::primitives,
     prelude::*,
     window::WindowResolution,
 };
 use bevy_hanabi::prelude::*;
 use bevy_mod_picking::{
     events::{Click, Pointer},
-    highlight::{DefaultHighlightingPlugin, GlobalHighlight, HighlightPlugin},
-    DefaultPickingPlugins, PickableBundle,
+    // highlight::{DefaultHighlightingPlugin, GlobalHighlight, HighlightPlugin},
+    DefaultPickingPlugins,
+    PickableBundle,
 };
 use bevy_rapier3d::prelude::*;
 use std::f32::consts::*;
@@ -163,23 +165,18 @@ pub struct ActivePhase(Phase);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, States)]
 pub enum Phase {
-    Fortify, // (Player),
-    Arm,     // (Player),
-    Target,  // (Player),
+    Fortify(Player),
+    Arm(Player),
+    Target(Player),
 }
 
 impl Default for Phase {
     fn default() -> Self {
-        Phase::Fortify // (Player::default())
+        Phase::Fortify(Player::default())
     }
 }
 
 impl Phase {
-    pub fn next(&self) -> Self {
-        todo!()
-    }
-
-    /*
     pub fn next(&self) -> Self {
         match self {
             Self::Fortify(Player::One) => Self::Arm(Player::One),
@@ -198,7 +195,6 @@ impl Phase {
             Self::Target(player) => player.clone(),
         }
     }
-    */
 }
 
 #[derive(Component, Clone, Debug)]
@@ -343,23 +339,19 @@ fn main() {
         .add_plugins(RapierDebugRenderPlugin::default())
         .add_plugins(LogDiagnosticsPlugin::default())
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
-        // .add_startup_system(load_structures.in_base_set(StartupSet::PreStartup))
         .add_systems(PreStartup, load_structures)
-        // .add_startup_system_to_stage(StartupSet::PreStartup, load_structures)
         .add_systems(Startup, setup)
-        .add_systems(Startup, progress_game) // TODO
+        .add_systems(Update, progress_game) // TODO
         .add_systems(Startup, refresh_terrain)
         .add_systems(Update, (check_collisions.run_if(should_check_collisions),))
         // Resources for these won't exist until later.
-        // .add_systems(Update, (place_wall.run_if(should_place_wall),))
-        // .add_systems(Update, (place_cannon.run_if(should_place_cannon),))
-        // .add_systems(Update, (pick_target.run_if(should_pick_target),))
+        .add_systems(Update, (place_wall.run_if(should_place_wall),))
+        .add_systems(Update, (place_cannon.run_if(should_place_cannon),))
+        .add_systems(Update, (pick_target.run_if(should_pick_target),))
         .add_systems(PostUpdate, expirations)
-        // .add_system(expanding.in_base_set(CoreSet::PostUpdate))
         .add_systems(PostUpdate, expanding)
         .add_systems(Update, bevy::window::close_on_esc)
-        // .add_loopless_state(Phase::default())
-        .add_state::<Phase>()
+        .insert_state(Phase::default())
         .add_event::<TerrainModifiedEvent>()
         .insert_resource(ClearColor(Color::hex("152238").unwrap()))
         .init_resource::<Terrain>()
@@ -377,22 +369,22 @@ fn spacebar_pressed(kbd: Res<Input<KeyCode>>) -> bool {
 */
 
 fn should_place_wall(state: Res<State<Phase>>) -> bool {
-    matches!(state.get(), Phase::Fortify)
+    matches!(state.get(), Phase::Fortify(_))
 }
 
 fn should_place_cannon(state: Res<State<Phase>>) -> bool {
-    matches!(state.get(), Phase::Arm)
+    matches!(state.get(), Phase::Arm(_))
 }
 
 fn should_pick_target(state: Res<State<Phase>>) -> bool {
-    matches!(state.get(), Phase::Target)
+    matches!(state.get(), Phase::Target(_))
 }
 
 fn should_check_collisions(state: Res<State<Phase>>) -> bool {
     match &state.get() {
-        Phase::Fortify => true,
-        Phase::Arm => true,
-        Phase::Target => true,
+        Phase::Fortify(_) => true,
+        Phase::Arm(_) => true,
+        Phase::Target(_) => true,
     }
 }
 
@@ -405,7 +397,7 @@ fn check_collisions(
     transforms: Query<&Transform>,
     names: Query<&Name>,
 ) {
-    for collision_event in collision_events.iter() {
+    for collision_event in collision_events.read() {
         match collision_event {
             CollisionEvent::Started(first, second, _) => {
                 let (target, projectile) = {
@@ -442,34 +434,32 @@ fn check_collisions(
                 sizes.add_key(1.0, Vec2::splat(0.0));
 
                 // Create a new expression module
-                let module = Module::default();
+                let mut module = Module::default();
+                let position = SetPositionSphereModifier {
+                    dimension: ShapeDimension::Volume,
+                    center: module.lit(Vec3::ZERO),
+                    radius: module.lit(0.25),
+                };
+
+                let lifetime = module.lit(0.3);
+                let init_lifetime = SetAttributeModifier::new(Attribute::LIFETIME, lifetime);
+
+                let accel = module.lit(Vec3::new(0., -8., 0.));
+                let update_accel = AccelModifier::new(accel);
+
+                let update_drag = LinearDragModifier::new(module.lit(5.));
 
                 // TODO Leaking?
                 let effect = effects.add(
                     EffectAsset::new(32768, Spawner::once(500.0.into(), true), module)
-                        /*
-                                            {
-                                                name: "Firework".to_string(),
-                                                // capacity: 32768,
-                                                spawner: Spawner::once(500.0.into(), true),
-                                                // ..Default::default()
-                                            }
-                        */
-                                            /*
-                                            .init(SetPositionSphereModifier {
-                                                dimension: ShapeDimension::Volume,
-                                                // radius: 0.25,
-                                                // speed: 70_f32.into(),
-                                                // center: Vec3::ZERO,
-                                            })
-                                            */
-                        // .init(ParticleLifetimeModifier { lifetime: 0.3 })
-                        // .update(LinearDragModifier { drag: 5. })
-                        // .update(AccelModifier::constant(Vec3::new(0., -8., 0.)))
+                        .init(position)
+                        .init(init_lifetime)
+                        .update(update_drag)
+                        .update(update_accel)
                         .render(ColorOverLifetimeModifier { gradient: colors })
                         .render(SizeOverLifetimeModifier {
                             gradient: sizes,
-                            screen_space_size: todo!(),
+                            screen_space_size: true,
                         }),
                 );
 
@@ -508,7 +498,7 @@ fn check_collisions(
         }
     }
 
-    for contact_force_event in contact_force_events.iter() {
+    for contact_force_event in contact_force_events.read() {
         info!("contact force: {:?}", contact_force_event);
     }
 }
@@ -524,42 +514,45 @@ fn pick_coordinates(
     mut events: EventReader<Pointer<Click>>,
     targets: Query<(&Transform, &Name, &Coordinates), Without<Cannon>>,
 ) -> Option<PickedCoordinates> {
-    for event in events.iter() {
-        /*
-        if let PickingEvent::Clicked(e) = event {
-            let (transform, target_name, coordinates) =
-                targets.get(*e).expect("Clicked entity not found?");
+    for event in events.read() {
+        let target = targets.get(event.target).ok();
 
-            info!(
-                "pick-coordinate {:?} p={:?}",
-                target_name.as_str(),
-                &coordinates
-            );
+        let Some((transform, target_name, coordinates)) = target else {
+            info!("pick-coordinate no target");
+            return None;
+        };
 
-            return Some(PickedCoordinates {
-                name: target_name.to_string(),
-                coordinates: coordinates.clone(),
-                transform: *transform,
-            });
-        }
-        */
+        info!(
+            "pick-coordinate {:?} p={:?}",
+            target_name.as_str(),
+            &coordinates
+        );
+
+        return Some(PickedCoordinates {
+            name: target_name.to_string(),
+            coordinates: coordinates.clone(),
+            transform: *transform,
+        });
     }
 
     None
 }
 
 pub fn progress_game(
-    mut _phase: ResMut<NextState<Phase>>,
-    mut _player: ResMut<ActivePlayer>,
+    phase: Res<State<Phase>>,
+    mut next_phase: ResMut<NextState<Phase>>,
+    mut player: ResMut<ActivePlayer>,
     mut modified: EventReader<TerrainModifiedEvent>,
     mut _commands: Commands,
 ) {
-    for _event in modified.iter() {
-        // let before = &phase.0.as_ref().unwrap();
-        // let after = before.next();
-        // info!("{:?} -> {:?}", before, after);
-        // *player = ActivePlayer(after.player());
-        // commands.insert_resource(NextState(after));
+    for event in modified.read() {
+        println!("{:?}", event);
+        println!("{:?}", phase);
+        let before = &phase.get();
+        let after = before.next();
+        info!("{:?} -> {:?}", before, after);
+        *player = ActivePlayer(after.player());
+        next_phase.set(after);
     }
 }
 
@@ -570,7 +563,7 @@ fn refresh_terrain(
     mut entities: ResMut<EntityLayer>,
     structures: Res<Structures>,
 ) {
-    for ev in modified.iter() {
+    for ev in modified.read() {
         info!("terrain-modified {:?}", ev);
 
         let grid = ev.0 .0;
@@ -618,7 +611,7 @@ pub fn place_wall(
             player: player.0.clone(),
             entity: None,
         }),
-    ))
+    ));
 }
 
 pub fn place_cannon(
@@ -642,7 +635,7 @@ pub fn place_cannon(
             player: player.0.clone(),
             entity: None,
         }),
-    ))
+    ));
 }
 
 pub fn pick_target(
@@ -660,7 +653,7 @@ pub fn pick_target(
 
     let picked = picked.expect("No picked");
 
-    let mesh: Handle<Mesh> = meshes.add(shape::Icosphere::default().try_into().unwrap());
+    let mesh: Handle<Mesh> = meshes.add(primitives::Sphere::default());
 
     let black = materials.add(StandardMaterial {
         base_color: Color::BLACK,
@@ -804,13 +797,15 @@ pub fn load_structures(
         perceptual_roughness: 1.0,
         ..default()
     });
-    let unknown = meshes.add(Mesh::from(shape::Box::new(TILE_SIZE, TILE_SIZE, TILE_SIZE)));
-    let v = meshes.add(Mesh::from(shape::Box::new(
+    let unknown = meshes.add(Mesh::from(primitives::Cuboid::new(
+        TILE_SIZE, TILE_SIZE, TILE_SIZE,
+    )));
+    let v = meshes.add(Mesh::from(primitives::Cuboid::new(
         WALL_WIDTH,
         WALL_HEIGHT,
         TILE_SIZE,
     )));
-    let h = meshes.add(Mesh::from(shape::Box::new(
+    let h = meshes.add(Mesh::from(primitives::Cuboid::new(
         TILE_SIZE,
         WALL_HEIGHT,
         WALL_WIDTH,
@@ -955,21 +950,20 @@ fn setup(
         },
     ));
 
-    commands.spawn((
-        Camera3dBundle {
-            transform: match DEFAULT_QUICK_CAMERA {
-                QuickCamera::Normal => {
-                    Transform::from_xyz(0.0, 18.0, -32.0).looking_at(Vec3::ZERO, Vec3::Y)
-                }
-                QuickCamera::TopDown => Transform::from_xyz(-12., 12., -12.)
-                    .looking_at(Vec3::new(-12., 1., -12.), Vec3::Z),
-                QuickCamera::CloseSide => Transform::from_xyz(-10., 1., -18.)
-                    .looking_at(Vec3::new(-10., 1., -8.), Vec3::Y),
-            },
-            ..default()
+    commands.spawn((Camera3dBundle {
+        transform: match DEFAULT_QUICK_CAMERA {
+            QuickCamera::Normal => {
+                Transform::from_xyz(0.0, 18.0, -32.0).looking_at(Vec3::ZERO, Vec3::Y)
+            }
+            QuickCamera::TopDown => {
+                Transform::from_xyz(-12., 12., -12.).looking_at(Vec3::new(-12., 1., -12.), Vec3::Z)
+            }
+            QuickCamera::CloseSide => {
+                Transform::from_xyz(-10., 1., -18.).looking_at(Vec3::new(-10., 1., -8.), Vec3::Y)
+            }
         },
-        // PickingCameraBundle::default(),
-    ));
+        ..default()
+    },));
 
     // Rigid body ground
     commands.spawn((
@@ -979,7 +973,7 @@ fn setup(
         Collider::cuboid(20., 0.1, 20.),
     ));
 
-    let ground = meshes.add(Mesh::from(shape::Box::new(
+    let ground = meshes.add(Mesh::from(primitives::Cuboid::new(
         TILE_SIZE * 0.95,
         GROUND_DEPTH,
         TILE_SIZE * 0.95,
