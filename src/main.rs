@@ -12,6 +12,7 @@ use bevy_mod_picking::{
     PickableBundle,
 };
 use bevy_rapier3d::prelude::*;
+use bevy_rts_camera::{RtsCamera, RtsCameraControls, RtsCameraPlugin};
 use std::f32::consts::*;
 
 const STRUCTURE_HEIGHT: f32 = 0.6;
@@ -339,9 +340,10 @@ fn main() {
         .add_plugins(RapierDebugRenderPlugin::default())
         .add_plugins(LogDiagnosticsPlugin::default())
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
+        .add_plugins(RtsCameraPlugin)
         .add_systems(PreStartup, load_structures)
         .add_systems(Startup, setup)
-        .add_systems(Update, progress_game) // TODO
+        .add_systems(Update, progress_game)
         .add_systems(Startup, refresh_terrain)
         .add_systems(Update, (check_collisions.run_if(should_check_collisions),))
         // Resources for these won't exist until later.
@@ -950,20 +952,26 @@ fn setup(
         },
     ));
 
-    commands.spawn((Camera3dBundle {
-        transform: match DEFAULT_QUICK_CAMERA {
-            QuickCamera::Normal => {
-                Transform::from_xyz(0.0, 18.0, -32.0).looking_at(Vec3::ZERO, Vec3::Y)
-            }
-            QuickCamera::TopDown => {
-                Transform::from_xyz(-12., 12., -12.).looking_at(Vec3::new(-12., 1., -12.), Vec3::Z)
-            }
-            QuickCamera::CloseSide => {
-                Transform::from_xyz(-10., 1., -18.).looking_at(Vec3::new(-10., 1., -8.), Vec3::Y)
-            }
-        },
-        ..default()
-    },));
+    if true {
+        commands.spawn((
+            Camera3dBundle::default(),
+            RtsCamera::default(),
+            RtsCameraControls::default(),
+        ));
+    } else {
+        commands.spawn((Camera3dBundle {
+            transform: match DEFAULT_QUICK_CAMERA {
+                QuickCamera::Normal => {
+                    Transform::from_xyz(0.0, 18.0, -32.0).looking_at(Vec3::ZERO, Vec3::Y)
+                }
+                QuickCamera::TopDown => Transform::from_xyz(-12., 12., -12.)
+                    .looking_at(Vec3::new(-12., 1., -12.), Vec3::Z),
+                QuickCamera::CloseSide => Transform::from_xyz(-10., 1., -18.)
+                    .looking_at(Vec3::new(-10., 1., -8.), Vec3::Y),
+            },
+            ..default()
+        },));
+    }
 
     // Rigid body ground
     commands.spawn((
@@ -971,6 +979,7 @@ fn setup(
         TransformBundle::from(Transform::from_xyz(0.0, 0.0, 0.0)),
         CollisionGroups::new(Group::all(), Group::all()),
         Collider::cuboid(20., 0.1, 20.),
+        bevy_rts_camera::Ground,
     ));
 
     let ground = meshes.add(Mesh::from(primitives::Cuboid::new(
