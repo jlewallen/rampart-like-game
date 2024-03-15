@@ -1,15 +1,12 @@
+#[allow(unused_imports)]
+use bevy::diagnostic::LogDiagnosticsPlugin;
 use bevy::{
-    diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
-    math::primitives,
-    prelude::*,
-    window::WindowResolution,
+    diagnostic::FrameTimeDiagnosticsPlugin, math::primitives, prelude::*, window::WindowResolution,
 };
 use bevy_hanabi::prelude::*;
 use bevy_mod_picking::{
     events::{Click, Pointer},
-    // highlight::{DefaultHighlightingPlugin, GlobalHighlight, HighlightPlugin},
-    DefaultPickingPlugins,
-    PickableBundle,
+    DefaultPickingPlugins, PickableBundle,
 };
 use bevy_rapier3d::prelude::*;
 use bevy_rts_camera::{RtsCamera, RtsCameraControls, RtsCameraPlugin};
@@ -337,14 +334,14 @@ fn main() {
                                    */
         )
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
-        .add_plugins(RapierDebugRenderPlugin::default())
-        .add_plugins(LogDiagnosticsPlugin::default())
+        // .add_plugins(RapierDebugRenderPlugin::default())
+        // .add_plugins(LogDiagnosticsPlugin::default())
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
         .add_plugins(RtsCameraPlugin)
         .add_systems(PreStartup, load_structures)
         .add_systems(Startup, setup)
         .add_systems(Update, progress_game)
-        .add_systems(Startup, refresh_terrain)
+        .add_systems(Update, refresh_terrain)
         .add_systems(Update, (check_collisions.run_if(should_check_collisions),))
         // Resources for these won't exist until later.
         .add_systems(Update, (place_wall.run_if(should_place_wall),))
@@ -496,7 +493,7 @@ fn check_collisions(
                         ));
                     });
             }
-            CollisionEvent::Stopped(_, _, _) => debug!("collision: {:?}", collision_event),
+            CollisionEvent::Stopped(_, _, _) => debug!("collision(stopped): {:?}", collision_event),
         }
     }
 
@@ -1072,8 +1069,7 @@ pub fn expirations(
         match expires.expiration {
             Some(expiration) => {
                 if timer.elapsed_seconds() > expiration {
-                    // https://bevy-cheatbook.github.io/features/parent-child.html#known-pitfalls
-                    info!("expiring '{:?}'", name.map(|n| n.as_str()));
+                    info!("expiring '{:?}'", name);
                     commands.entity(entity).despawn_recursive();
                 }
             }
