@@ -10,6 +10,7 @@ bevy_hanabi = "0.10.0"
 bevy_mod_picking = "0.18.2"
 bevy_rapier3d = { version = "0.25.0", features = ["debug-render"] }
 bevy_rts_camera = "0.4.0"
+noise = "0.8.2"
 
 # Add this to your Cargo.toml
 [profile.dev.package.bevy_rapier3d]

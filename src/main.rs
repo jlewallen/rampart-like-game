@@ -12,297 +12,12 @@ use bevy_rapier3d::prelude::*;
 use bevy_rts_camera::{RtsCamera, RtsCameraControls, RtsCameraPlugin};
 use std::f32::consts::*;
 
-const STRUCTURE_HEIGHT: f32 = 0.6;
-const GROUND_DEPTH: f32 = 0.2;
-const WALL_HEIGHT: f32 = 0.6;
-const WALL_WIDTH: f32 = 0.4;
-const TILE_SIZE: f32 = 1.0;
-const ROUND_SHOT_SIZE: f32 = 0.25;
-const BRICK_COLOR: &str = "E7444A";
+mod model;
+mod resources;
+mod ui;
 
-// We base all the math on a desired time of flight that
-// looks appropriate for the distance.
-const MAXIMUM_HORIZONTAL_DISTANCE: f32 = 35.0;
-const MINIMUM_FLIGHT_TIME: f32 = 1.0;
-const GRAVITY: f32 = 9.8;
-
-pub type Vec2Usize = (usize, usize);
-
-#[derive(Debug)]
-pub struct WorldGeometry<T> {
-    size: Vec2Usize,
-    map: Vec<T>,
-}
-
-#[derive(Debug)]
-pub struct Around<T>((T, T, T), (T, T, T), (T, T, T));
-
-impl<T> Around<T> {
-    pub fn map<R>(&self, map_fn: &dyn Fn(&T) -> R) -> Around<R> {
-        Around(
-            (map_fn(&self.0 .0), map_fn(&self.0 .1), map_fn(&self.0 .2)),
-            (map_fn(&self.1 .0), map_fn(&self.1 .1), map_fn(&self.1 .2)),
-            (map_fn(&self.2 .0), map_fn(&self.2 .1), map_fn(&self.2 .2)),
-        )
-    }
-}
-
-impl Around<Vec2Usize> {
-    pub fn center(c: Vec2Usize) -> Self {
-        Self(
-            ((c.0 - 1, c.1 - 1), (c.0, c.1 - 1), (c.0 + 1, c.1 - 1)),
-            ((c.0 - 1, c.1), (c.0, c.1), (c.0 + 1, c.1)),
-            ((c.0 - 1, c.1 + 1), (c.0, c.1 + 1), (c.0 + 1, c.1 + 1)),
-        )
-    }
-}
-
-impl<T> WorldGeometry<T>
-where
-    T: Default + Clone,
-{
-    pub fn new(size: Vec2Usize) -> Self {
-        Self {
-            size,
-            map: vec![T::default(); size.0 * size.1],
-        }
-    }
-
-    pub fn set(&mut self, c: Vec2Usize, value: T) {
-        let index = self.coordinates_to_index(c);
-        self.map[index] = value;
-    }
-
-    pub fn get(&self, c: Vec2Usize) -> Option<&T> {
-        let index = self.coordinates_to_index(c);
-        if index < self.map.len() {
-            Some(&self.map[index])
-        } else {
-            None
-        }
-    }
-
-    pub fn outline(&mut self, (x0, y0): Vec2Usize, (x1, y1): Vec2Usize, value: T) {
-        for x in x0..(x1 + 1) {
-            self.set((x, y0), value.clone());
-            self.set((x, y1), value.clone());
-        }
-        for y in (y0 + 1)..y1 {
-            self.set((x0, y), value.clone());
-            self.set((x1, y), value.clone());
-        }
-    }
-
-    pub fn layout(&self) -> Vec<(Vec2Usize, Vec2, &T)> {
-        self.map
-            .iter()
-            .enumerate()
-            .map(|(index, value)| {
-                (
-                    self.index_to_grid(index),
-                    self.index_to_coordindates(index),
-                    value,
-                )
-            })
-            .collect()
-    }
-
-    pub fn around(&self, c: Vec2Usize) -> Around<Option<&T>> {
-        Around::center(c).map(&|c| self.get(*c))
-    }
-
-    pub fn grid_position(&self, grid: Vec2Usize) -> Vec2 {
-        self.index_to_coordindates(self.coordinates_to_index(grid))
-    }
-
-    fn index_to_grid(&self, index: usize) -> Vec2Usize {
-        (index % self.size.0, index / self.size.1)
-    }
-
-    fn index_to_coordindates(&self, index: usize) -> Vec2 {
-        let c = self.index_to_grid(index);
-        let x: f32 = (c.0 as f32 - (self.size.0 / 2) as f32) * TILE_SIZE + (TILE_SIZE / 2.);
-        let y: f32 = (c.1 as f32 - (self.size.1 / 2) as f32) * TILE_SIZE + (TILE_SIZE / 2.);
-        Vec2::new(x, y)
-    }
-
-    fn coordinates_to_index(&self, c: Vec2Usize) -> usize {
-        c.1 * self.size.1 + (c.0)
-    }
-}
-
-#[derive(Component, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Coordinates(Vec2Usize);
-
-#[derive(Component, Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Player {
-    One,
-    Two,
-}
-
-impl Player {
-    pub fn next(&self) -> Self {
-        match self {
-            Player::One => Player::Two,
-            Player::Two => Player::One,
-        }
-    }
-}
-
-impl Default for Player {
-    fn default() -> Player {
-        Player::One
-    }
-}
-
-#[derive(Resource, Default)]
-pub struct ActivePlayer(Player);
-
-#[derive(Resource, Default)]
-pub struct ActivePhase(Phase);
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, States)]
-pub enum Phase {
-    Fortify(Player),
-    Arm(Player),
-    Target(Player),
-}
-
-impl Default for Phase {
-    fn default() -> Self {
-        Phase::Fortify(Player::default())
-    }
-}
-
-impl Phase {
-    pub fn next(&self) -> Self {
-        match self {
-            Self::Fortify(Player::One) => Self::Arm(Player::One),
-            Self::Arm(Player::One) => Self::Fortify(Player::Two),
-            Self::Fortify(Player::Two) => Self::Arm(Player::Two),
-            Self::Arm(Player::Two) => Self::Target(Player::One),
-            Self::Target(Player::One) => Self::Target(Player::Two),
-            Self::Target(Player::Two) => Self::Fortify(Player::One),
-        }
-    }
-
-    pub fn player(&self) -> Player {
-        match self {
-            Self::Fortify(player) => player.clone(),
-            Self::Arm(player) => player.clone(),
-            Self::Target(player) => player.clone(),
-        }
-    }
-}
-
-#[derive(Component, Clone, Debug)]
-pub enum Ground {
-    Dirt,
-    Grass,
-    Water,
-}
-
-impl Default for Ground {
-    fn default() -> Self {
-        Self::Dirt
-    }
-}
-
-#[derive(Component, Clone, Debug)]
-pub struct Wall {
-    pub player: Player,
-    pub entity: Option<Entity>,
-}
-
-#[derive(Component, Clone, Debug)]
-pub struct Cannon {
-    pub player: Player,
-    pub entity: Option<Entity>,
-}
-
-#[derive(Clone, Debug)]
-pub enum Structure {
-    Wall(Wall),
-    Cannon(Cannon),
-}
-
-#[derive(Resource)]
-pub struct Terrain {
-    ground_layer: WorldGeometry<Ground>,
-    structure_layer: WorldGeometry<Option<Structure>>,
-}
-
-#[derive(Resource)]
-pub struct EntityLayer(WorldGeometry<Option<Vec<Entity>>>);
-
-impl EntityLayer {
-    pub fn new(size: Vec2Usize) -> Self {
-        Self(WorldGeometry::new(size))
-    }
-}
-
-impl FromWorld for EntityLayer {
-    fn from_world(_world: &mut World) -> Self {
-        Self::new((32, 32))
-    }
-}
-
-impl FromWorld for Terrain {
-    fn from_world(_world: &mut World) -> Self {
-        load_terrain((32, 32))
-    }
-}
-
-impl Terrain {
-    pub fn new(size: Vec2Usize) -> Self {
-        Self {
-            ground_layer: WorldGeometry::new(size),
-            structure_layer: WorldGeometry::new(size),
-        }
-    }
-
-    pub fn create_castle(&mut self, center: Vec2Usize, size: Vec2Usize, player: Player) {
-        let (x0, y0) = (center.0 - size.0 / 2, center.1 - size.1 / 2);
-        let (x1, y1) = (center.0 + size.0 / 2, center.1 + size.1 / 2);
-
-        self.structure_layer.outline(
-            (x0, y0),
-            (x1, y1),
-            Some(Structure::Wall(Wall {
-                player: player.clone(),
-                entity: None,
-            })),
-        );
-
-        self.structure_layer.set(
-            center,
-            Some(Structure::Cannon(Cannon {
-                player,
-                entity: None,
-            })),
-        );
-    }
-}
-
-pub fn load_terrain(size: Vec2Usize) -> Terrain {
-    let mut terrain = Terrain::new(size);
-    terrain.ground_layer.set((4, 4), Ground::Grass);
-    terrain.create_castle((4, 4), (4, 4), Player::One);
-    terrain.create_castle((26, 26), (4, 4), Player::Two);
-    terrain
-}
-
-pub trait Projectile {}
-
-#[derive(Component, Clone, Debug)]
-pub struct RoundShot {}
-
-impl Projectile for RoundShot {}
-
-#[derive(Clone, Debug)]
-pub struct TerrainModifiedEvent(Coordinates, Structure);
-
-impl Event for TerrainModifiedEvent {}
+use model::*;
+use resources::Structures;
 
 fn main() {
     App::new()
@@ -338,7 +53,7 @@ fn main() {
         // .add_plugins(LogDiagnosticsPlugin::default())
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
         .add_plugins(RtsCameraPlugin)
-        .add_systems(PreStartup, load_structures)
+        .add_systems(PreStartup, resources::load_structures)
         .add_systems(Startup, setup)
         .add_systems(Update, progress_game)
         .add_systems(Update, refresh_terrain)
@@ -355,17 +70,9 @@ fn main() {
         .insert_resource(ClearColor(Color::hex("152238").unwrap()))
         .init_resource::<Terrain>()
         .init_resource::<ActivePlayer>()
-        .init_resource::<ActivePhase>()
         .init_resource::<EntityLayer>()
         .run();
 }
-
-/*
-/// Condition checking if spacebar is pressed
-fn spacebar_pressed(kbd: Res<Input<KeyCode>>) -> bool {
-    kbd.pressed(KeyCode::Space)
-}
-*/
 
 fn should_place_wall(state: Res<State<Phase>>) -> bool {
     matches!(state.get(), Phase::Fortify(_))
@@ -550,7 +257,7 @@ pub fn progress_game(
         let before = &phase.get();
         let after = before.next();
         info!("{:?} -> {:?}", before, after);
-        *player = ActivePlayer(after.player());
+        *player = ActivePlayer::new(after.player());
         next_phase.set(after);
     }
 }
@@ -565,8 +272,8 @@ fn refresh_terrain(
     for ev in modified.read() {
         info!("terrain-modified {:?}", ev);
 
-        let grid = ev.0 .0;
-        let structure = ev.1.clone();
+        let grid = ev.coordinates().clone().into();
+        let structure = ev.structure().clone();
         let position = terrain.structure_layer.grid_position(grid);
         let existing = terrain.structure_layer.get(grid).expect("Out of bounds");
         if existing.is_some() {
@@ -604,10 +311,10 @@ pub fn place_wall(
 
     info!("place-wall p={:?}", &picked);
 
-    modified.send(TerrainModifiedEvent(
+    modified.send(TerrainModifiedEvent::new(
         picked.coordinates,
         Structure::Wall(Wall {
-            player: player.0.clone(),
+            player: player.player().clone(),
             entity: None,
         }),
     ));
@@ -628,10 +335,10 @@ pub fn place_cannon(
 
     info!("place-cannon p={:?}", &picked);
 
-    modified.send(TerrainModifiedEvent(
+    modified.send(TerrainModifiedEvent::new(
         picked.coordinates,
         Structure::Cannon(Cannon {
-            player: player.0.clone(),
+            player: player.player().clone(),
             entity: None,
         }),
     ));
@@ -743,82 +450,21 @@ pub fn pick_target(
     }
 }
 
-#[derive(Debug)]
-pub enum ConnectingWall {
-    Isolated,
-    Vertical,
-    Horizontal,
-    Corner(u32),
-    Unknown,
-}
-
-impl<T> From<&Around<Option<&Option<T>>>> for ConnectingWall {
-    fn from(value: &Around<Option<&Option<T>>>) -> Self {
-        match value {
-            Around((_, _, _), (_, _, Some(Some(_))), (_, Some(Some(_)), _)) => Self::Corner(0), // Bottom Right
-            Around((_, _, _), (Some(Some(_)), _, _), (_, Some(Some(_)), _)) => Self::Corner(90), // Bottom Left
-            Around((_, Some(Some(_)), _), (Some(Some(_)), _, _), (_, _, _)) => Self::Corner(180), // Top Left
-            Around((_, Some(Some(_)), _), (_, _, Some(Some(_))), (_, _, _)) => Self::Corner(270), // Top Right
-            Around(_, (Some(Some(_)), _, Some(Some(_))), _) => Self::Horizontal,
-            Around((_, Some(Some(_)), _), (_, _, _), (_, Some(Some(_)), _)) => Self::Vertical,
-            Around((_, _, _), (_, _, _), (_, _, _)) => Self::Unknown,
-        }
-    }
-}
-
 #[allow(dead_code)]
-enum QuickCamera {
+enum CameraMode {
+    Rts,
     Normal,
     TopDown,
     CloseSide,
 }
 
-const DEFAULT_QUICK_CAMERA: QuickCamera = QuickCamera::Normal;
-
-#[derive(Resource)]
-pub struct Structures {
-    simple: Handle<StandardMaterial>,
-    unknown: Handle<Mesh>,
-    h: Handle<Mesh>,
-    v: Handle<Mesh>,
-    corner: Handle<Scene>,
-    cannon: Handle<Scene>,
+impl Default for CameraMode {
+    fn default() -> Self {
+        CameraMode::Rts
+    }
 }
 
-pub fn load_structures(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    asset_server: Res<AssetServer>,
-) {
-    let simple = materials.add(StandardMaterial {
-        base_color: Color::hex(BRICK_COLOR).expect("BRICK_COLOR"),
-        perceptual_roughness: 1.0,
-        ..default()
-    });
-    let unknown = meshes.add(Mesh::from(primitives::Cuboid::new(
-        TILE_SIZE, TILE_SIZE, TILE_SIZE,
-    )));
-    let v = meshes.add(Mesh::from(primitives::Cuboid::new(
-        WALL_WIDTH,
-        WALL_HEIGHT,
-        TILE_SIZE,
-    )));
-    let h = meshes.add(Mesh::from(primitives::Cuboid::new(
-        TILE_SIZE,
-        WALL_HEIGHT,
-        WALL_WIDTH,
-    )));
-
-    commands.insert_resource(Structures {
-        simple,
-        unknown,
-        h,
-        v,
-        corner: asset_server.load("corner.glb#Scene0"),
-        cannon: asset_server.load("cannon.glb#Scene0"),
-    })
-}
+impl CameraMode {}
 
 fn create_structure(
     commands: &mut Commands,
@@ -851,7 +497,7 @@ fn create_structure(
                     PickableBundle::default(),
                     Collider::cuboid(TILE_SIZE / 2., STRUCTURE_HEIGHT / 2., TILE_SIZE / 2.),
                     CollisionGroups::new(Group::all(), Group::all()),
-                    Coordinates(grid),
+                    Coordinates::new(grid),
                     wall.player.clone(),
                     wall.clone(),
                 ))
@@ -909,7 +555,7 @@ fn create_structure(
                     PickableBundle::default(),
                     CollisionGroups::new(Group::all(), Group::all()),
                     Collider::cuboid(TILE_SIZE / 2., STRUCTURE_HEIGHT / 2., TILE_SIZE / 2.),
-                    Coordinates(grid),
+                    Coordinates::new(grid),
                     cannon.player.clone(),
                     cannon.clone(),
                 ))
@@ -949,26 +595,27 @@ fn setup(
         },
     ));
 
-    if true {
-        commands.spawn((
+    match CameraMode::default() {
+        CameraMode::Rts => commands.spawn((
             Camera3dBundle::default(),
             RtsCamera::default(),
             RtsCameraControls::default(),
-        ));
-    } else {
-        commands.spawn((Camera3dBundle {
-            transform: match DEFAULT_QUICK_CAMERA {
-                QuickCamera::Normal => {
-                    Transform::from_xyz(0.0, 18.0, -32.0).looking_at(Vec3::ZERO, Vec3::Y)
-                }
-                QuickCamera::TopDown => Transform::from_xyz(-12., 12., -12.)
-                    .looking_at(Vec3::new(-12., 1., -12.), Vec3::Z),
-                QuickCamera::CloseSide => Transform::from_xyz(-10., 1., -18.)
-                    .looking_at(Vec3::new(-10., 1., -8.), Vec3::Y),
-            },
+        )),
+        CameraMode::Normal => commands.spawn((Camera3dBundle {
+            transform: Transform::from_xyz(0.0, 18.0, -32.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..default()
-        },));
-    }
+        },)),
+        CameraMode::TopDown => commands.spawn((Camera3dBundle {
+            transform: Transform::from_xyz(-12., 12., -12.)
+                .looking_at(Vec3::new(-12., 1., -12.), Vec3::Z),
+            ..default()
+        },)),
+        CameraMode::CloseSide => commands.spawn((Camera3dBundle {
+            transform: Transform::from_xyz(-10., 1., -18.)
+                .looking_at(Vec3::new(-10., 1., -8.), Vec3::Y),
+            ..default()
+        },)),
+    };
 
     // Rigid body ground
     commands.spawn((
@@ -1017,7 +664,7 @@ fn setup(
                 ..default()
             },
             PickableBundle::default(),
-            Coordinates(grid),
+            Coordinates::new(grid),
         ));
     }
 
@@ -1077,5 +724,26 @@ pub fn expirations(
                 expires.expiration = Some(timer.elapsed_seconds() + expires.lifetime);
             }
         }
+    }
+}
+
+#[derive(Resource)]
+pub struct EntityLayer(WorldGeometry<Option<Vec<Entity>>>);
+
+impl EntityLayer {
+    pub fn new(size: Vec2Usize) -> Self {
+        Self(WorldGeometry::new(size))
+    }
+}
+
+impl FromWorld for EntityLayer {
+    fn from_world(_world: &mut World) -> Self {
+        Self::new((32, 32))
+    }
+}
+
+impl FromWorld for Terrain {
+    fn from_world(_world: &mut World) -> Self {
+        load_terrain((32, 32))
     }
 }
