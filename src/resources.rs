@@ -8,8 +8,8 @@ use super::model::*;
 pub struct Structures {
     pub simple: Handle<StandardMaterial>,
     pub unknown: Handle<Mesh>,
-    pub h: Handle<Mesh>,
-    pub v: Handle<Mesh>,
+    pub east_west: Handle<Mesh>,
+    pub north_south: Handle<Mesh>,
     pub corner: Handle<Scene>,
     pub cannon: Handle<Scene>,
 }
@@ -28,12 +28,12 @@ pub fn load_structures(
     let unknown = meshes.add(Mesh::from(primitives::Cuboid::new(
         TILE_SIZE, TILE_SIZE, TILE_SIZE,
     )));
-    let v = meshes.add(Mesh::from(primitives::Cuboid::new(
+    let north_south = meshes.add(Mesh::from(primitives::Cuboid::new(
         WALL_WIDTH,
         WALL_HEIGHT,
         TILE_SIZE,
     )));
-    let h = meshes.add(Mesh::from(primitives::Cuboid::new(
+    let east_west = meshes.add(Mesh::from(primitives::Cuboid::new(
         TILE_SIZE,
         WALL_HEIGHT,
         WALL_WIDTH,
@@ -42,8 +42,8 @@ pub fn load_structures(
     commands.insert_resource(Structures {
         simple,
         unknown,
-        h,
-        v,
+        east_west,
+        north_south,
         corner: asset_server.load("corner.glb#Scene0"),
         cannon: asset_server.load("cannon.glb#Scene0"),
     })

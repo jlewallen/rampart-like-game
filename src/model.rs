@@ -1,5 +1,12 @@
 use bevy::{
-    ecs::{component::Component, entity::Entity, event::Event, schedule::States, system::Resource},
+    ecs::{
+        component::Component,
+        entity::Entity,
+        event::Event,
+        schedule::States,
+        system::Resource,
+        world::{FromWorld, World},
+    },
     math::Vec2,
 };
 
@@ -272,8 +279,8 @@ pub enum Structure {
 #[derive(Debug)]
 pub enum ConnectingWall {
     Isolated,
-    Vertical,
-    Horizontal,
+    NorthSouth,
+    EastWest,
     Corner(u32),
     Unknown,
 }
@@ -285,8 +292,8 @@ impl<T> From<&Around<Option<&Option<T>>>> for ConnectingWall {
             Around((_, _, _), (Some(Some(_)), _, _), (_, Some(Some(_)), _)) => Self::Corner(90), // Bottom Left
             Around((_, Some(Some(_)), _), (Some(Some(_)), _, _), (_, _, _)) => Self::Corner(180), // Top Left
             Around((_, Some(Some(_)), _), (_, _, Some(Some(_))), (_, _, _)) => Self::Corner(270), // Top Right
-            Around(_, (Some(Some(_)), _, Some(Some(_))), _) => Self::Horizontal,
-            Around((_, Some(Some(_)), _), (_, _, _), (_, Some(Some(_)), _)) => Self::Vertical,
+            Around(_, (Some(Some(_)), _, Some(Some(_))), _) => Self::EastWest,
+            Around((_, Some(Some(_)), _), (_, _, _), (_, Some(Some(_)), _)) => Self::NorthSouth,
             Around((_, _, _), (_, _, _), (_, _, _)) => Self::Unknown,
         }
     }
@@ -329,10 +336,31 @@ impl Terrain {
     }
 }
 
+impl FromWorld for Terrain {
+    fn from_world(_world: &mut World) -> Self {
+        load_terrain((32, 32))
+    }
+}
+
 pub fn load_terrain(size: Vec2Usize) -> Terrain {
     let mut terrain = Terrain::new(size);
     terrain.ground_layer.set((4, 4), Ground::Grass);
     terrain.create_castle((4, 4), (4, 4), Player::One);
     terrain.create_castle((26, 26), (4, 4), Player::Two);
     terrain
+}
+
+#[derive(Resource)]
+pub struct EntityLayer(WorldGeometry<Option<Vec<Entity>>>);
+
+impl EntityLayer {
+    pub fn new(size: Vec2Usize) -> Self {
+        Self(WorldGeometry::new(size))
+    }
+}
+
+impl FromWorld for EntityLayer {
+    fn from_world(_world: &mut World) -> Self {
+        Self::new((32, 32))
+    }
 }

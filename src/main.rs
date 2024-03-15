@@ -6,6 +6,7 @@ use bevy::{
 use bevy_hanabi::prelude::*;
 use bevy_mod_picking::{
     events::{Click, Pointer},
+    highlight::{Highlight, HighlightKind},
     DefaultPickingPlugins, PickableBundle,
 };
 use bevy_rapier3d::prelude::*;
@@ -19,6 +20,24 @@ mod ui;
 use model::*;
 use resources::Structures;
 
+const HIGHLIGHT_TINT: Highlight<StandardMaterial> = Highlight {
+    hovered: Some(HighlightKind::new_dynamic(|matl| StandardMaterial {
+        // base_color: matl.base_color + Color::rgba(-0.2, -0.2, 0.4, 0.0),
+        base_color: Color::rgb(0.35, 0.35, 0.35).into(),
+        ..matl.to_owned()
+    })),
+    pressed: Some(HighlightKind::new_dynamic(|matl| StandardMaterial {
+        // base_color: matl.base_color + Color::rgba(-0.3, -0.3, 0.5, 0.0),
+        base_color: Color::rgb(0.35, 0.75, 0.35).into(),
+        ..matl.to_owned()
+    })),
+    selected: Some(HighlightKind::new_dynamic(|matl| StandardMaterial {
+        // base_color: matl.base_color + Color::rgba(-0.3, 0.2, -0.3, 0.0),
+        base_color: Color::rgb(0.35, 0.35, 0.75).into(),
+        ..matl.to_owned()
+    })),
+};
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -30,24 +49,7 @@ fn main() {
             ..default()
         }))
         .add_plugins(HanabiPlugin)
-        .add_plugins(
-            DefaultPickingPlugins, /*
-                                   .set(HighlightPlugin::<StandardMaterial> {
-                                       highlighting_default: |mut assets| GlobalHighlight {
-                                           hovered: assets.add(Color::rgb(0.35, 0.35, 0.35).into()),
-                                           pressed: assets.add(Color::rgb(0.35, 0.75, 0.35).into()),
-                                           selected: assets.add(Color::rgb(0.35, 0.35, 0.75).into()),
-                                       },
-                                   })
-                                   .set(HighlightPlugin::<ColorMaterial> {
-                                       highlighting_default: |mut assets| GlobalHighlight {
-                                           hovered: assets.add(Color::rgb(0.35, 0.35, 0.35).into()),
-                                           pressed: assets.add(Color::rgb(0.35, 0.75, 0.35).into()),
-                                           selected: assets.add(Color::rgb(0.35, 0.35, 0.75).into()),
-                                       },
-                                   }),
-                                   */
-        )
+        .add_plugins(DefaultPickingPlugins)
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
         // .add_plugins(RapierDebugRenderPlugin::default())
         // .add_plugins(LogDiagnosticsPlugin::default())
@@ -58,7 +60,6 @@ fn main() {
         .add_systems(Update, progress_game)
         .add_systems(Update, refresh_terrain)
         .add_systems(Update, (check_collisions.run_if(should_check_collisions),))
-        // Resources for these won't exist until later.
         .add_systems(Update, (place_wall.run_if(should_place_wall),))
         .add_systems(Update, (place_cannon.run_if(should_place_cannon),))
         .add_systems(Update, (pick_target.run_if(should_pick_target),))
@@ -500,6 +501,7 @@ fn create_structure(
                     Coordinates::new(grid),
                     wall.player.clone(),
                     wall.clone(),
+                    HIGHLIGHT_TINT,
                 ))
                 .with_children(|parent| match connecting {
                     ConnectingWall::Isolated => {
@@ -509,16 +511,16 @@ fn create_structure(
                             ..default()
                         });
                     }
-                    ConnectingWall::Vertical => {
+                    ConnectingWall::NorthSouth => {
                         parent.spawn(PbrBundle {
-                            mesh: structures.v.clone(),
+                            mesh: structures.north_south.clone(),
                             material: structures.simple.clone(),
                             ..default()
                         });
                     }
-                    ConnectingWall::Horizontal => {
+                    ConnectingWall::EastWest => {
                         parent.spawn(PbrBundle {
-                            mesh: structures.h.clone(),
+                            mesh: structures.east_west.clone(),
                             material: structures.simple.clone(),
                             ..default()
                         });
@@ -558,6 +560,7 @@ fn create_structure(
                     Coordinates::new(grid),
                     cannon.player.clone(),
                     cannon.clone(),
+                    HIGHLIGHT_TINT,
                 ))
                 .with_children(|parent| {
                     parent.spawn(SceneBundle {
@@ -665,6 +668,7 @@ fn setup(
             },
             PickableBundle::default(),
             Coordinates::new(grid),
+            HIGHLIGHT_TINT,
         ));
     }
 
@@ -724,26 +728,5 @@ pub fn expirations(
                 expires.expiration = Some(timer.elapsed_seconds() + expires.lifetime);
             }
         }
-    }
-}
-
-#[derive(Resource)]
-pub struct EntityLayer(WorldGeometry<Option<Vec<Entity>>>);
-
-impl EntityLayer {
-    pub fn new(size: Vec2Usize) -> Self {
-        Self(WorldGeometry::new(size))
-    }
-}
-
-impl FromWorld for EntityLayer {
-    fn from_world(_world: &mut World) -> Self {
-        Self::new((32, 32))
-    }
-}
-
-impl FromWorld for Terrain {
-    fn from_world(_world: &mut World) -> Self {
-        load_terrain((32, 32))
     }
 }
