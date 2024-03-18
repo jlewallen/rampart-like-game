@@ -1475,6 +1475,7 @@ dependencies = [
  "bevy_rapier3d",
  "bevy_rts_camera",
  "noise",
+ "rand 0.8.5",
 ]
 
 [[package]]

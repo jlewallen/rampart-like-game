@@ -1,7 +1,16 @@
 #[allow(unused_imports)]
 use bevy::diagnostic::LogDiagnosticsPlugin;
+use bevy::render::mesh::Meshable;
 use bevy::{
-    diagnostic::FrameTimeDiagnosticsPlugin, math::primitives, prelude::*, window::WindowResolution,
+    diagnostic::FrameTimeDiagnosticsPlugin,
+    math::primitives,
+    prelude::*,
+    render::{
+        mesh::{Indices, PrimitiveTopology},
+        primitives::Frustum,
+        render_asset::RenderAssetUsages,
+    },
+    window::WindowResolution,
 };
 use bevy_hanabi::prelude::*;
 use bevy_mod_picking::{
@@ -11,6 +20,10 @@ use bevy_mod_picking::{
 };
 use bevy_rapier3d::prelude::*;
 use bevy_rts_camera::{RtsCamera, RtsCameraControls, RtsCameraPlugin};
+use noise::{
+    utils::{NoiseMap, NoiseMapBuilder as _, PlaneMapBuilder},
+    Perlin, Terrace,
+};
 use std::f32::consts::*;
 
 mod model;
@@ -66,6 +79,8 @@ fn main() {
         .add_systems(PostUpdate, expirations)
         .add_systems(PostUpdate, expanding)
         .add_systems(Update, bevy::window::close_on_esc)
+        // .add_systems(OnEnter(GenerateState::Build), generate_world)
+        .insert_state(GenerateState::default())
         .insert_state(Phase::default())
         .add_event::<TerrainModifiedEvent>()
         .insert_resource(ClearColor(Color::hex("152238").unwrap()))
@@ -73,6 +88,14 @@ fn main() {
         .init_resource::<ActivePlayer>()
         .init_resource::<EntityLayer>()
         .run();
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, States)]
+pub enum GenerateState {
+    #[default]
+    Setup,
+    Build,
+    Finished,
 }
 
 fn should_place_wall(state: Res<State<Phase>>) -> bool {
@@ -578,6 +601,7 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut entities: ResMut<EntityLayer>,
+    mut generate_state: ResMut<NextState<GenerateState>>,
     terrain: Res<Terrain>,
     structures: Res<Structures>,
 ) {
@@ -606,6 +630,9 @@ fn setup(
         )),
         CameraMode::Normal => commands.spawn((Camera3dBundle {
             transform: Transform::from_xyz(0.0, 18.0, -32.0).looking_at(Vec3::ZERO, Vec3::Y),
+            frustum: Frustum {
+                ..Default::default()
+            },
             ..default()
         },)),
         CameraMode::TopDown => commands.spawn((Camera3dBundle {
@@ -629,47 +656,59 @@ fn setup(
         bevy_rts_camera::Ground,
     ));
 
-    let ground = meshes.add(Mesh::from(primitives::Cuboid::new(
-        TILE_SIZE * 0.95,
-        GROUND_DEPTH,
-        TILE_SIZE * 0.95,
-    )));
+    if false {
+        let ground = meshes.add(Mesh::from(primitives::Cuboid::new(
+            TILE_SIZE * 0.95,
+            GROUND_DEPTH,
+            TILE_SIZE * 0.95,
+        )));
 
-    let dirt = materials.add(StandardMaterial {
-        base_color: Color::BEIGE,
-        perceptual_roughness: 1.0,
-        ..default()
-    });
+        let dirt = materials.add(StandardMaterial {
+            base_color: Color::BEIGE,
+            perceptual_roughness: 1.0,
+            ..default()
+        });
 
-    let grass = materials.add(StandardMaterial {
-        base_color: Color::GREEN,
-        perceptual_roughness: 1.0,
-        ..default()
-    });
+        let grass = materials.add(StandardMaterial {
+            base_color: Color::GREEN,
+            perceptual_roughness: 1.0,
+            ..default()
+        });
 
-    let water = materials.add(StandardMaterial {
-        base_color: Color::BLUE,
-        perceptual_roughness: 1.0,
-        ..default()
-    });
+        let water = materials.add(StandardMaterial {
+            base_color: Color::BLUE,
+            perceptual_roughness: 1.0,
+            ..default()
+        });
 
-    for (grid, position, item) in terrain.ground_layer.layout() {
-        commands.spawn((
-            Name::new(format!("Ground{:?}", &grid)),
-            PbrBundle {
-                mesh: ground.clone(),
-                material: match item {
-                    Ground::Dirt => dirt.clone(),
-                    Ground::Grass => grass.clone(),
-                    Ground::Water => water.clone(),
+        for (grid, position, item) in terrain.ground_layer.layout() {
+            // info!("{:?}", position);
+            commands.spawn((
+                Name::new(format!("Ground{:?}", &grid)),
+                PbrBundle {
+                    mesh: ground.clone(),
+                    material: match item {
+                        Ground::Dirt => dirt.clone(),
+                        Ground::Grass => grass.clone(),
+                        Ground::Water => water.clone(),
+                    },
+                    transform: Transform::from_xyz(position.x, 0.0, position.y),
+                    ..default()
                 },
-                transform: Transform::from_xyz(position.x, 0.0, position.y),
-                ..default()
-            },
-            PickableBundle::default(),
-            Coordinates::new(grid),
-            HIGHLIGHT_TINT,
-        ));
+                PickableBundle::default(),
+                Coordinates::new(grid),
+                HIGHLIGHT_TINT,
+            ));
+        }
+    } else {
+        let terrain_seed = TerrainSeed::new((32, 32));
+        let mesh = terrain_seed.mesh();
+
+        commands.spawn((PbrBundle {
+            mesh: meshes.add(mesh),
+            material: materials.add(Color::rgb(1., 1., 1.)),
+            ..Default::default()
+        },));
     }
 
     for (grid, position, item) in terrain.structure_layer.layout() {
@@ -685,6 +724,8 @@ fn setup(
             )
         }
     }
+
+    generate_state.set(GenerateState::Build);
 }
 
 #[derive(Component, Clone)]
@@ -728,5 +769,158 @@ pub fn expirations(
                 expires.expiration = Some(timer.elapsed_seconds() + expires.lifetime);
             }
         }
+    }
+}
+
+fn get_color(val: f64) -> Color {
+    let color_result = match val.abs() {
+        v if v < 0.1 => Color::hex("#0a7e0a"),
+        v if v < 0.2 => Color::hex("#0da50d"),
+        v if v < 0.3 => Color::hex("#10cb10"),
+        v if v < 0.4 => Color::hex("#18ed18"),
+        v if v < 0.5 => Color::hex("#3ff03f"),
+        v if v < 0.6 => Color::hex("#65f365"),
+        v if v < 0.7 => Color::hex("#8cf68c"),
+        v if v < 0.8 => Color::hex("#b2f9b2"),
+        v if v < 0.9 => Color::hex("#d9fcd9"),
+        v if v <= 1.0 => Color::hex("#ffffff"),
+        _ => panic!("unexpected value"),
+    };
+    color_result.expect("Getting color from HEX error")
+}
+
+struct TerrainSeed {
+    size: (usize, usize),
+    seed: u32,
+}
+
+impl Default for TerrainSeed {
+    fn default() -> Self {
+        Self {
+            size: (32, 32),
+            seed: Default::default(),
+        }
+    }
+}
+
+impl TerrainSeed {
+    fn new(size: (usize, usize)) -> Self {
+        Self { size, seed: 0 }
+    }
+
+    fn noise_map(&self) -> NoiseMap {
+        let perlin = Perlin::new(self.seed);
+
+        let terrace_inverted: Terrace<_, _, 2> = Terrace::new(perlin)
+            .add_control_point(-1.0)
+            .add_control_point(-0.5)
+            .add_control_point(0.1)
+            .add_control_point(1.0)
+            .invert_terraces(true);
+
+        PlaneMapBuilder::new(terrace_inverted)
+            .set_size(self.size.0, self.size.1)
+            .build()
+    }
+}
+
+impl Meshable for TerrainSeed {
+    type Output = Mesh;
+
+    fn mesh(&self) -> Self::Output {
+        let map = self.noise_map();
+        let (w, h) = map.size();
+        let scale: Vec2 = Vec2::new(1.0, 1.0);
+        let offset: Vec2 = Vec2::new(w as f32 / -2., h as f32 / -2.);
+
+        /*
+        CCW Order
+
+        0   1
+        2   3
+
+        0,2,3
+        0,3,1
+
+        0  1  2
+        3  4  5
+        6  7  8
+
+        0,3,4
+        0,4,1
+        1,4,5
+        1,5,2
+        3,6,7
+        3,7,4
+        4,7,8
+        4,8,5
+        */
+
+        let normals: Vec<Vec3> = map.iter().map(|_| Vec3::new(0., 1., 0.)).collect();
+
+        // Note: (0.0, 0.0) = Top-Left in UV mapping, (1.0, 1.0) = Bottom-Right in UV mapping
+        let uvs: Vec<_> = map
+            .iter()
+            .enumerate()
+            .map(|(index, _)| {
+                let i = (index % w) as f32 / (w as f32);
+                let j = (index / w) as f32 / (h as f32);
+                Vec2::new(i, j)
+            })
+            .collect();
+
+        let colors: Vec<[f32; 4]> = map
+            .iter()
+            .enumerate()
+            .map(|(_index, _)| [1.0, 1.0, 1.0, 1.0])
+            .collect();
+
+        let positions: Vec<_> = map
+            .into_iter()
+            .enumerate()
+            .map(|(i, value)| {
+                let x = ((i % w) as f32 + offset.x) * scale.x;
+                let y = ((i / w) as f32 + offset.y) * scale.y;
+                Vec3::new(x, value as f32, y)
+            })
+            .collect();
+
+        let mut indices = Vec::new();
+        for r in 0..(h - 1) {
+            for c in 0..(w - 1) {
+                let i = r * w;
+                indices.push(i + c);
+                indices.push(((r + 1) * w) + c);
+                indices.push((((r + 1) * w) + c) + 1);
+                indices.push(i + c);
+                indices.push((((r + 1) * w) + c) + 1);
+                indices.push(i + c + 1);
+            }
+        }
+
+        if false {
+            println!("{:#?}", positions);
+            println!("{:#?}", indices.len());
+            println!("{:#?}", positions.len());
+            for triangle in indices.chunks(3) {
+                println!("{:?}", triangle);
+            }
+        }
+
+        for index in indices.iter() {
+            assert!(*index < positions.len());
+        }
+
+        Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+        )
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors)
+        .with_inserted_indices(Indices::U32(
+            indices.into_iter().map(|v| v as u32).collect(),
+        ))
     }
 }
