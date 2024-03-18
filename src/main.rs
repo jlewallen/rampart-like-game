@@ -773,7 +773,7 @@ pub fn expirations(
 }
 
 fn get_color(val: f64) -> Color {
-    let color_result = match val.abs() {
+    let color = match val.abs() {
         v if v < 0.1 => Color::hex("#0a7e0a"),
         v if v < 0.2 => Color::hex("#0da50d"),
         v if v < 0.3 => Color::hex("#10cb10"),
@@ -786,7 +786,7 @@ fn get_color(val: f64) -> Color {
         v if v <= 1.0 => Color::hex("#ffffff"),
         _ => panic!("unexpected value"),
     };
-    color_result.expect("Getting color from HEX error")
+    color.expect("bad color")
 }
 
 struct TerrainSeed {
@@ -871,8 +871,7 @@ impl Meshable for TerrainSeed {
 
         let colors: Vec<[f32; 4]> = map
             .iter()
-            .enumerate()
-            .map(|(_index, _)| [1.0, 1.0, 1.0, 1.0])
+            .map(|value| get_color(*value).as_rgba_f32())
             .collect();
 
         let positions: Vec<_> = map
@@ -889,26 +888,14 @@ impl Meshable for TerrainSeed {
         for r in 0..(h - 1) {
             for c in 0..(w - 1) {
                 let i = r * w;
+                let l = (r + 1) * w;
                 indices.push(i + c);
-                indices.push(((r + 1) * w) + c);
-                indices.push((((r + 1) * w) + c) + 1);
+                indices.push(l + c);
+                indices.push((l + c) + 1);
                 indices.push(i + c);
-                indices.push((((r + 1) * w) + c) + 1);
+                indices.push((l + c) + 1);
                 indices.push(i + c + 1);
             }
-        }
-
-        if false {
-            println!("{:#?}", positions);
-            println!("{:#?}", indices.len());
-            println!("{:#?}", positions.len());
-            for triangle in indices.chunks(3) {
-                println!("{:?}", triangle);
-            }
-        }
-
-        for index in indices.iter() {
-            assert!(*index < positions.len());
         }
 
         Mesh::new(
