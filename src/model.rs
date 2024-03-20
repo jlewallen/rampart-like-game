@@ -26,6 +26,27 @@ pub const GRAVITY: f32 = 9.8;
 
 pub type Vec2Usize = (usize, usize);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Seed<T>(T);
+
+impl<T: Default> Default for Seed<T> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
+impl From<Seed<u32>> for u32 {
+    fn from(value: Seed<u32>) -> Self {
+        value.0
+    }
+}
+
+impl From<u32> for Seed<u32> {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
 #[derive(Debug)]
 pub struct WorldGeometry<T> {
     size: Vec2Usize,

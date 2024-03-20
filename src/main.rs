@@ -1,4 +1,7 @@
-use bevy::prelude::*;
+use bevy::{
+    pbr::wireframe::{WireframeConfig, WireframePlugin},
+    prelude::*,
+};
 use bevy_hanabi::prelude::*;
 use bevy_mod_picking::prelude::*;
 use bevy_rapier3d::prelude::*;
@@ -47,12 +50,23 @@ fn main() {
         .add_plugins(devel::DeveloperPlugin)
         .add_plugins(building::BuildingPlugin)
         .add_plugins(firing::FiringPlugin)
+        .add_plugins(WireframePlugin)
         .add_plugins(TerrainPlugin)
         .add_systems(PreStartup, resources::load_structures)
         .add_systems(Update, progress_game)
         .add_systems(Update, (check_collisions.run_if(should_check_collisions),))
         .add_systems(PostUpdate, bevy::window::close_on_esc)
         .insert_resource(ClearColor(Color::hex("152238").unwrap()))
+        // Wireframes can be configured with this resource. This can be changed at runtime.
+        .insert_resource(WireframeConfig {
+            // The global wireframe config enables drawing of wireframes on every mesh,
+            // except those with `NoWireframe`. Meshes with `Wireframe` will always have a wireframe,
+            // regardless of the global configuration.
+            global: true,
+            // Controls the default color of all wireframes. Used as the default color for global wireframes.
+            // Can be changed per mesh using the `WireframeColor` component.
+            default_color: Color::WHITE,
+        })
         .insert_state(Phase::default())
         .add_event::<ConstructionEvent>()
         .init_resource::<ActivePlayer>()
