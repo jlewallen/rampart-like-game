@@ -8,18 +8,23 @@ use crate::{
     pick_coordinates,
     resources::{self, Structures},
     ActivePlayer, Cannon, ConnectingWall, ConstructionEvent, Coordinates, Phase, Structure,
-    StructureLayers, Vec2Usize, Wall, GROUND_DEPTH, WALL_HEIGHT,
+    StructureLayers, Terrain, Vec2Usize, Wall, GROUND_DEPTH, WALL_HEIGHT,
 };
 
 pub struct BuildingPlugin;
 
 impl Plugin for BuildingPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_structures)
-            .add_systems(Update, (place_wall.run_if(should_place_wall),))
-            .add_systems(Update, (place_cannon.run_if(should_place_cannon),))
-            .add_systems(Update, refresh_terrain)
-            .init_resource::<StructureLayers>();
+        if false {
+            app.add_systems(Startup, setup_structures)
+                .add_systems(Update, (place_wall.run_if(should_place_wall),))
+                .add_systems(Update, (place_cannon.run_if(should_place_cannon),))
+                .add_systems(Update, refresh_terrain)
+                .init_resource::<StructureLayers>();
+        } else {
+            app.add_systems(Update, keyboard)
+                .add_systems(Update, placing);
+        }
     }
 }
 
@@ -31,7 +36,7 @@ fn should_place_cannon(state: Res<State<Phase>>) -> bool {
     matches!(state.get(), Phase::Arm(_))
 }
 
-pub fn place_wall(
+fn place_wall(
     player: Res<ActivePlayer>,
     events: EventReader<Pointer<Click>>,
     targets: Query<(&Transform, &Name, Option<&Coordinates>), Without<Cannon>>,
@@ -55,7 +60,7 @@ pub fn place_wall(
     ));
 }
 
-pub fn place_cannon(
+fn place_cannon(
     player: Res<ActivePlayer>,
     events: EventReader<Pointer<Click>>,
     targets: Query<(&Transform, &Name, Option<&Coordinates>), Without<Cannon>>,
@@ -241,3 +246,58 @@ fn refresh_terrain(
         );
     }
 }
+
+fn keyboard(
+    keys: Res<ButtonInput<KeyCode>>,
+    placing: Query<(Entity, &Placing)>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    if keys.just_pressed(KeyCode::KeyB) {
+        info!("{:?}", KeyCode::KeyB);
+
+        if let Some((entity, _)) = placing.get_single().ok() {
+            commands.entity(entity).despawn_recursive();
+        }
+
+        commands.spawn((
+            Name::new("Placing"),
+            Pickable::IGNORE,
+            Placing {},
+            PbrBundle {
+                mesh: meshes.add(Cuboid::new(1., 0.2, 1.)),
+                material: materials.add(StandardMaterial {
+                    base_color: Color::WHITE,
+                    ..default()
+                }),
+                transform: Transform::from_translation(Vec3::Y),
+                ..default()
+            },
+        ));
+    }
+}
+
+fn placing(
+    mut events: EventReader<Pointer<Move>>,
+    mut placing: Query<(&Placing, &mut Transform)>,
+    terrain: Query<&Terrain>,
+) {
+    let Some(terrain) = terrain.get_single().ok() else {
+        warn!("no terrain");
+        return;
+    };
+
+    info!("{:?}", terrain);
+
+    for event in events.read() {
+        if let Some(position) = event.event.hit.position {
+            for (_, mut transform) in &mut placing {
+                *transform = Transform::from_translation(position);
+            }
+        }
+    }
+}
+
+#[derive(Component, Debug)]
+struct Placing {}

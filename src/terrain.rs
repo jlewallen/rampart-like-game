@@ -53,13 +53,21 @@ impl TerrainSeed {
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Debug)]
 pub struct Water {}
 
 #[derive(Component)]
 pub struct Terrain {
     options: TerrainOptions,
     noise: NoiseMap,
+}
+
+impl std::fmt::Debug for Terrain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Terrain")
+            .field("options", &self.options)
+            .finish()
+    }
 }
 
 impl Into<Terrain> for TerrainSeed {
@@ -166,11 +174,13 @@ impl Plugin for TerrainPlugin {
 
 #[derive(Bundle)]
 pub struct TerrainBundle {
+    terrain: Terrain,
     pbr: PbrBundle,
 }
 
 #[derive(Bundle)]
 pub struct WaterBundle {
+    water: Water,
     pbr: PbrBundle,
 }
 
@@ -189,22 +199,24 @@ fn generate_terrain(
             material: materials.add(Color::rgb(1., 1., 1.)),
             ..Default::default()
         },
+        terrain,
     };
 
-    let water = TerrainBundle {
+    let water = WaterBundle {
         pbr: PbrBundle {
             mesh: meshes.add(Plane3d::default().mesh().size(64.0, 64.0)),
             material: materials.add(Color::rgb(0., 0., 1.)),
             ..Default::default()
         },
+        water: Water {},
     };
 
     commands.spawn((
         Name::new("Ground"),
-        terrain,
         CollisionGroups::new(Group::all(), Group::all()),
         Collider::cuboid(20., 0.1, 20.),
         bevy_rts_camera::Ground,
+        terrain,
     ));
 
     let tween = Tween::new(
@@ -220,11 +232,10 @@ fn generate_terrain(
 
     commands.spawn((
         Name::new("Water"),
-        Water {},
-        water,
         CollisionGroups::new(Group::all(), Group::all()),
         Collider::cuboid(20., 0.1, 20.),
         Animator::new(tween),
+        water,
     ));
 
     commands.spawn((

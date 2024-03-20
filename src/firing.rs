@@ -18,7 +18,7 @@ fn should_pick_target(state: Res<State<Phase>>) -> bool {
     matches!(state.get(), Phase::Target(_))
 }
 
-pub fn pick_target(
+fn pick_target(
     events: EventReader<Pointer<Click>>,
     targets: Query<(&Transform, &Name, Option<&Coordinates>), Without<Cannon>>,
     mut commands: Commands,
