@@ -1,4 +1,3 @@
-#[allow(unused_imports)]
 use bevy::prelude::*;
 use bevy_hanabi::prelude::*;
 use bevy_mod_picking::prelude::*;
@@ -56,9 +55,7 @@ fn main() {
         .insert_resource(ClearColor(Color::hex("152238").unwrap()))
         .insert_state(Phase::default())
         .add_event::<ConstructionEvent>()
-        .init_resource::<Terrain>()
         .init_resource::<ActivePlayer>()
-        .init_resource::<EntityLayer>()
         .run();
 }
 

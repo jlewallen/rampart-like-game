@@ -243,12 +243,9 @@ impl ConstructionEvent {
 
 impl Event for ConstructionEvent {}
 
-#[allow(dead_code)]
 #[derive(Component, Clone, Debug)]
 pub enum Ground {
     Dirt,
-    Grass,
-    Water,
 }
 
 impl Default for Ground {
@@ -275,10 +272,9 @@ pub enum Structure {
     Cannon(Cannon),
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub enum ConnectingWall {
-    Isolated,
+    // Isolated,
     NorthSouth,
     EastWest,
     Corner(u32),
@@ -300,11 +296,11 @@ impl<T> From<&Around<Option<&Option<T>>>> for ConnectingWall {
 }
 
 #[derive(Resource)]
-pub struct Terrain {
+pub struct StructureLayers {
     pub(crate) structure_layer: WorldGeometry<Option<Structure>>,
 }
 
-impl Terrain {
+impl StructureLayers {
     pub fn new(size: Vec2Usize) -> Self {
         Self {
             structure_layer: WorldGeometry::new(size),
@@ -334,30 +330,11 @@ impl Terrain {
     }
 }
 
-impl FromWorld for Terrain {
+impl FromWorld for StructureLayers {
     fn from_world(_world: &mut World) -> Self {
-        load_terrain((32, 32))
-    }
-}
-
-pub fn load_terrain(size: Vec2Usize) -> Terrain {
-    let mut terrain = Terrain::new(size);
-    terrain.create_castle((4, 4), (4, 4), Player::One);
-    terrain.create_castle((26, 26), (4, 4), Player::Two);
-    terrain
-}
-
-#[derive(Resource)]
-pub struct EntityLayer(WorldGeometry<Option<Vec<Entity>>>);
-
-impl EntityLayer {
-    pub fn new(size: Vec2Usize) -> Self {
-        Self(WorldGeometry::new(size))
-    }
-}
-
-impl FromWorld for EntityLayer {
-    fn from_world(_world: &mut World) -> Self {
-        Self::new((32, 32))
+        let mut structure_layers = StructureLayers::new((32, 32));
+        structure_layers.create_castle((4, 4), (4, 4), Player::One);
+        structure_layers.create_castle((26, 26), (4, 4), Player::Two);
+        structure_layers
     }
 }

@@ -11,7 +11,7 @@ enum CameraMode {
 
 impl Default for CameraMode {
     fn default() -> Self {
-        CameraMode::Normal
+        CameraMode::Rts
     }
 }
 

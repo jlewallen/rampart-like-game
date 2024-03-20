@@ -7,8 +7,8 @@ use super::model::*;
 use crate::{
     pick_coordinates,
     resources::{self, Structures},
-    ActivePlayer, Cannon, ConnectingWall, ConstructionEvent, Coordinates, EntityLayer, Phase,
-    Structure, Terrain, Vec2Usize, Wall, GROUND_DEPTH, WALL_HEIGHT,
+    ActivePlayer, Cannon, ConnectingWall, ConstructionEvent, Coordinates, Phase, Structure,
+    StructureLayers, Vec2Usize, Wall, GROUND_DEPTH, WALL_HEIGHT,
 };
 
 pub struct BuildingPlugin;
@@ -18,7 +18,8 @@ impl Plugin for BuildingPlugin {
         app.add_systems(Startup, setup_structures)
             .add_systems(Update, (place_wall.run_if(should_place_wall),))
             .add_systems(Update, (place_cannon.run_if(should_place_cannon),))
-            .add_systems(Update, refresh_terrain);
+            .add_systems(Update, refresh_terrain)
+            .init_resource::<StructureLayers>();
     }
 }
 
@@ -80,12 +81,11 @@ pub fn place_cannon(
 
 fn create_structure(
     commands: &mut Commands,
-    terrain: &Terrain,
+    terrain: &StructureLayers,
     grid: Vec2Usize,
     position: &Vec2,
     item: &Structure,
     structures: &Res<Structures>,
-    _entities: &mut ResMut<EntityLayer>,
 ) {
     match item {
         Structure::Wall(wall) => {
@@ -115,6 +115,7 @@ fn create_structure(
                     resources::HIGHLIGHT_TINT,
                 ))
                 .with_children(|parent| match connecting {
+                    /*
                     ConnectingWall::Isolated => {
                         parent.spawn(PbrBundle {
                             mesh: structures.unknown.clone(),
@@ -122,6 +123,7 @@ fn create_structure(
                             ..default()
                         });
                     }
+                    */
                     ConnectingWall::NorthSouth => {
                         parent.spawn(PbrBundle {
                             mesh: structures.north_south.clone(),
@@ -186,20 +188,18 @@ fn create_structure(
 
 fn setup_structures(
     mut commands: Commands,
-    mut entities: ResMut<EntityLayer>,
-    terrain: Res<Terrain>,
+    structure_layers: Res<StructureLayers>,
     structures: Res<Structures>,
 ) {
-    for (grid, position, item) in terrain.structure_layer.layout() {
+    for (grid, position, item) in structure_layers.structure_layer.layout() {
         if let Some(item) = item {
             create_structure(
                 &mut commands,
-                &terrain,
+                &structure_layers,
                 grid,
                 &position,
                 item,
                 &structures,
-                &mut entities,
             )
         }
     }
@@ -208,8 +208,7 @@ fn setup_structures(
 fn refresh_terrain(
     mut commands: Commands,
     mut modified: EventReader<ConstructionEvent>,
-    mut terrain: ResMut<Terrain>,
-    mut entities: ResMut<EntityLayer>,
+    mut structure_layers: ResMut<StructureLayers>,
     structures: Res<Structures>,
 ) {
     for ev in modified.read() {
@@ -217,24 +216,28 @@ fn refresh_terrain(
 
         let grid = ev.coordinates().clone().into();
         let structure = ev.structure().clone();
-        let position = terrain.structure_layer.grid_position(grid);
-        let existing = terrain.structure_layer.get(grid).expect("Out of bounds");
+        let position = structure_layers.structure_layer.grid_position(grid);
+        let existing = structure_layers
+            .structure_layer
+            .get(grid)
+            .expect("Out of bounds");
         if existing.is_some() {
             return;
         }
 
-        let _around = terrain.structure_layer.around(grid);
+        let _around = structure_layers.structure_layer.around(grid);
 
-        terrain.structure_layer.set(grid, Some(structure.clone()));
+        structure_layers
+            .structure_layer
+            .set(grid, Some(structure.clone()));
 
         create_structure(
             &mut commands,
-            &terrain,
+            &structure_layers,
             grid,
             &position,
             &structure,
             &structures,
-            &mut entities,
         );
     }
 }

@@ -1,5 +1,3 @@
-#[allow(unused_imports)]
-use bevy::diagnostic::LogDiagnosticsPlugin;
 use bevy::{math::primitives, prelude::*};
 use bevy_mod_picking::prelude::*;
 
