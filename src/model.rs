@@ -225,9 +225,9 @@ pub struct RoundShot {}
 impl Projectile for RoundShot {}
 
 #[derive(Clone, Debug)]
-pub struct TerrainModifiedEvent(Coordinates, Structure);
+pub struct ConstructionEvent(Coordinates, Structure);
 
-impl TerrainModifiedEvent {
+impl ConstructionEvent {
     pub fn new(coordinates: Coordinates, structure: Structure) -> Self {
         Self(coordinates, structure)
     }
@@ -241,7 +241,7 @@ impl TerrainModifiedEvent {
     }
 }
 
-impl Event for TerrainModifiedEvent {}
+impl Event for ConstructionEvent {}
 
 #[allow(dead_code)]
 #[derive(Component, Clone, Debug)]
@@ -301,14 +301,12 @@ impl<T> From<&Around<Option<&Option<T>>>> for ConnectingWall {
 
 #[derive(Resource)]
 pub struct Terrain {
-    pub(crate) ground_layer: WorldGeometry<Ground>,
     pub(crate) structure_layer: WorldGeometry<Option<Structure>>,
 }
 
 impl Terrain {
     pub fn new(size: Vec2Usize) -> Self {
         Self {
-            ground_layer: WorldGeometry::new(size),
             structure_layer: WorldGeometry::new(size),
         }
     }
@@ -344,7 +342,6 @@ impl FromWorld for Terrain {
 
 pub fn load_terrain(size: Vec2Usize) -> Terrain {
     let mut terrain = Terrain::new(size);
-    terrain.ground_layer.set((4, 4), Ground::Grass);
     terrain.create_castle((4, 4), (4, 4), Player::One);
     terrain.create_castle((26, 26), (4, 4), Player::Two);
     terrain

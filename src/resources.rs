@@ -1,6 +1,7 @@
 #[allow(unused_imports)]
 use bevy::diagnostic::LogDiagnosticsPlugin;
 use bevy::{math::primitives, prelude::*};
+use bevy_mod_picking::prelude::*;
 
 use super::model::*;
 
@@ -48,3 +49,21 @@ pub fn load_structures(
         cannon: asset_server.load("cannon.glb#Scene0"),
     })
 }
+
+pub const HIGHLIGHT_TINT: Highlight<StandardMaterial> = Highlight {
+    hovered: Some(HighlightKind::new_dynamic(|matl| StandardMaterial {
+        // base_color: matl.base_color + Color::rgba(-0.2, -0.2, 0.4, 0.0),
+        base_color: Color::rgb(0.35, 0.35, 0.35).into(),
+        ..matl.to_owned()
+    })),
+    pressed: Some(HighlightKind::new_dynamic(|matl| StandardMaterial {
+        // base_color: matl.base_color + Color::rgba(-0.3, -0.3, 0.5, 0.0),
+        base_color: Color::rgb(0.35, 0.75, 0.35).into(),
+        ..matl.to_owned()
+    })),
+    selected: Some(HighlightKind::new_dynamic(|matl| StandardMaterial {
+        // base_color: matl.base_color + Color::rgba(-0.3, 0.2, -0.3, 0.0),
+        base_color: Color::rgb(0.35, 0.35, 0.75).into(),
+        ..matl.to_owned()
+    })),
+};
