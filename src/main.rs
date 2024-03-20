@@ -18,6 +18,7 @@ mod resources;
 mod terrain;
 mod ui;
 
+use bevy_tweening::TweeningPlugin;
 use model::*;
 use terrain::*;
 
@@ -45,6 +46,7 @@ fn main() {
         // .add_plugins(RapierDebugRenderPlugin::default())
         // .add_plugins(LogDiagnosticsPlugin::default())
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
+        .add_plugins(TweeningPlugin)
         .add_plugins(camera::CameraPlugin)
         .add_plugins(helpers::HelpersPlugin)
         .add_plugins(devel::DeveloperPlugin)

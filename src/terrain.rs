@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use bevy::{
     prelude::*,
     render::{
@@ -6,6 +8,10 @@ use bevy::{
     },
 };
 use bevy_rapier3d::prelude::*;
+use bevy_tweening::{
+    component_animator_system, lens::TransformPositionLens, AnimationSystem, Animator,
+    EaseFunction, RepeatCount, RepeatStrategy, Tween,
+};
 use noise::{
     utils::{NoiseMap, NoiseMapBuilder, PlaneMapBuilder},
     Perlin, Terrace,
@@ -46,6 +52,9 @@ impl TerrainSeed {
             .build()
     }
 }
+
+#[derive(Component)]
+pub struct Water {}
 
 #[derive(Component)]
 pub struct Terrain {
@@ -148,7 +157,10 @@ pub struct TerrainPlugin;
 
 impl Plugin for TerrainPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, generate_terrain);
+        app.add_systems(Startup, generate_terrain).add_systems(
+            Update,
+            component_animator_system::<Water>.in_set(AnimationSystem::AnimationUpdate),
+        );
     }
 }
 
@@ -195,11 +207,24 @@ fn generate_terrain(
         bevy_rts_camera::Ground,
     ));
 
+    let tween = Tween::new(
+        EaseFunction::QuadraticInOut,
+        Duration::from_secs(2),
+        TransformPositionLens {
+            start: Vec3::ZERO,
+            end: Vec3::new(0.0, 0.02, 0.0),
+        },
+    )
+    .with_repeat_count(RepeatCount::Infinite)
+    .with_repeat_strategy(RepeatStrategy::MirroredRepeat);
+
     commands.spawn((
         Name::new("Water"),
+        Water {},
         water,
         CollisionGroups::new(Group::all(), Group::all()),
         Collider::cuboid(20., 0.1, 20.),
+        Animator::new(tween),
     ));
 
     commands.spawn((
