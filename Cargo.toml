@@ -5,12 +5,14 @@ edition = "2021"
 
 [dependencies]
 bevy = { version = "0.13.0", features = ["png", "bevy_pbr"] }
+bevy-inspector-egui = "0.23.4"
 bevy_ecs_tilemap = { git = "https://github.com/StarArawn/bevy_ecs_tilemap" }
 bevy_hanabi = "0.10.0"
 bevy_mod_picking = "0.18.2"
 bevy_rapier3d = { version = "0.25.0", features = ["debug-render"] }
 bevy_rts_camera = "0.4.0"
 bevy_tweening = "0.10.0"
+itertools = "0.12.1"
 noise = "0.8.2"
 rand = "0.8.5"
 

@@ -23,7 +23,8 @@ impl Plugin for BuildingPlugin {
                 .init_resource::<StructureLayers>();
         } else {
             app.add_systems(Update, keyboard)
-                .add_systems(Update, placing);
+                .add_systems(Update, placing)
+                .add_systems(Update, try_place);
         }
     }
 }
@@ -264,7 +265,7 @@ fn keyboard(
         commands.spawn((
             Name::new("Placing"),
             Pickable::IGNORE,
-            Placing {},
+            Placing { allowed: true },
             PbrBundle {
                 mesh: meshes.add(Cuboid::new(1., 0.2, 1.)),
                 material: materials.add(StandardMaterial {
@@ -280,15 +281,19 @@ fn keyboard(
 
 fn placing(
     mut events: EventReader<Pointer<Move>>,
-    mut placing: Query<(&Placing, &mut Transform)>,
+    mut placing: Query<(&mut Placing, &mut Transform)>,
     terrain: Query<&Terrain>,
 ) {
+    if events.is_empty() {
+        return;
+    }
+
     let Some(terrain) = terrain.get_single().ok() else {
         warn!("no terrain");
         return;
     };
 
-    info!("{:?}", terrain);
+    trace!("{:?}", terrain);
 
     for event in events.read() {
         if let Some(position) = event.event.hit.position {
@@ -299,5 +304,39 @@ fn placing(
     }
 }
 
+fn try_place(
+    mut events: EventReader<Pointer<Click>>,
+    mut placing: Query<(&mut Placing, &mut Transform)>,
+    terrain: Query<&Terrain>,
+) {
+    if events.is_empty() {
+        return;
+    }
+
+    let Some(terrain) = terrain.get_single().ok() else {
+        warn!("no terrain");
+        return;
+    };
+
+    info!("{:?}", terrain);
+
+    for event in events.read() {
+        if let Some(position) = event.event.hit.position {
+            info!("{:?}", position);
+
+            if let Some(survey) = terrain.survey(position) {
+                info!("{:#?}", survey);
+            }
+
+            for (_, mut transform) in &mut placing {
+                *transform = Transform::from_translation(position);
+            }
+        }
+    }
+}
+
 #[derive(Component, Debug)]
-struct Placing {}
+struct Placing {
+    #[allow(dead_code)]
+    allowed: bool,
+}

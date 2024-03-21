@@ -7,7 +7,7 @@ use bevy::{
         system::Resource,
         world::{FromWorld, World},
     },
-    math::Vec2,
+    math::{IVec2, Vec2},
 };
 
 pub const STRUCTURE_HEIGHT: f32 = 0.6;
@@ -57,7 +57,7 @@ pub struct WorldGeometry<T> {
 pub struct Around<T>((T, T, T), (T, T, T), (T, T, T));
 
 impl<T> Around<T> {
-    pub fn map<R>(&self, map_fn: &dyn Fn(&T) -> R) -> Around<R> {
+    pub fn map<R>(&self, map_fn: impl Fn(&T) -> R) -> Around<R> {
         Around(
             (map_fn(&self.0 .0), map_fn(&self.0 .1), map_fn(&self.0 .2)),
             (map_fn(&self.1 .0), map_fn(&self.1 .1), map_fn(&self.1 .2)),
@@ -66,12 +66,24 @@ impl<T> Around<T> {
     }
 }
 
-impl Around<Vec2Usize> {
-    pub fn center(c: Vec2Usize) -> Self {
+impl Around<IVec2> {
+    pub fn center(c: IVec2) -> Self {
         Self(
-            ((c.0 - 1, c.1 - 1), (c.0, c.1 - 1), (c.0 + 1, c.1 - 1)),
-            ((c.0 - 1, c.1), (c.0, c.1), (c.0 + 1, c.1)),
-            ((c.0 - 1, c.1 + 1), (c.0, c.1 + 1), (c.0 + 1, c.1 + 1)),
+            (
+                IVec2::new(c.x - 1, c.y - 1),
+                IVec2::new(c.x, c.y - 1),
+                IVec2::new(c.x + 1, c.y - 1),
+            ),
+            (
+                IVec2::new(c.x - 1, c.y),
+                IVec2::new(c.x, c.y),
+                IVec2::new(c.x + 1, c.y),
+            ),
+            (
+                IVec2::new(c.x - 1, c.y + 1),
+                IVec2::new(c.x, c.y + 1),
+                IVec2::new(c.x + 1, c.y + 1),
+            ),
         )
     }
 }
@@ -127,7 +139,8 @@ where
     }
 
     pub fn around(&self, c: Vec2Usize) -> Around<Option<&T>> {
-        Around::center(c).map(&|c| self.get(*c))
+        Around::center(IVec2::new(c.0 as i32, c.1 as i32))
+            .map(|c| self.get((c.x as usize, c.y as usize)))
     }
 
     pub fn grid_position(&self, grid: Vec2Usize) -> Vec2 {
