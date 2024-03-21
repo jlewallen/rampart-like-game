@@ -79,7 +79,7 @@ pub struct Water {}
 #[derive(Component)]
 pub struct Terrain {
     options: TerrainOptions,
-    noise: NoiseMap,
+    noise: Grid<f64>,
 }
 
 impl Terrain {
@@ -101,9 +101,11 @@ impl Terrain {
     pub fn survey(&self, position: Vec3) -> Option<Survey> {
         match self.world_to_grid(position) {
             Some(index) => {
-                let grid = GridView::new(&self.noise, self.noise.size().0);
-                let around = grid.adjacent(index.as_ivec2());
+                let noise: Grid<f64> = self.noise.clone();
+                let noise = noise.expand();
+                let around = noise.around(index.as_ivec2());
 
+                info!("{:#?}", index.as_ivec2());
                 info!("{:#?}", around);
 
                 None
@@ -141,7 +143,7 @@ impl std::fmt::Debug for Terrain {
 impl From<TerrainOptions> for Terrain {
     fn from(value: TerrainOptions) -> Self {
         Self {
-            noise: value.noise(),
+            noise: value.noise().into(),
             options: value,
         }
     }
@@ -162,7 +164,11 @@ impl Meshable for Terrain {
                 (0..size.x).map(move |c| {
                     let grid = UVec2::new(c, r);
                     let index = grid / resolution;
-                    let value = self.noise[(index.x as usize, index.y as usize)];
+                    let value = self
+                        .noise
+                        .get(IVec2::new(index.x as i32, index.y as i32))
+                        .copied()
+                        .unwrap_or_default();
                     (grid, value as f32)
                 })
             })
@@ -340,6 +346,7 @@ fn get_color(val: f32) -> Color {
     color.expect("bad color")
 }
 
+/*
 pub struct GridView<'a, T> {
     width: usize,
     target: &'a T,
@@ -351,15 +358,10 @@ impl<'a, T> GridView<'a, T> {
     }
 }
 
-#[allow(dead_code)]
 impl<'a, V> GridView<'a, Vec<V>> {
     fn get(&self, p: &IVec2) -> Option<&V> {
         let index = p.y * (self.width as i32) + p.x;
         self.target.get(index as usize)
-    }
-
-    pub fn adjacent(&self, center: IVec2) -> Around<Option<&V>> {
-        Around::center(center).map(|xy| self.get(xy))
     }
 }
 
@@ -373,43 +375,23 @@ impl<'a> GridView<'a, NoiseMap> {
             None
         }
     }
+}
 
-    pub fn adjacent(&self, center: IVec2) -> Around<Option<f64>> {
+impl<'a> AroundCenter<f64> for GridView<'a, NoiseMap> {
+    fn around(&self, center: IVec2) -> Around<Option<f64>> {
         Around::center(center).map(|xy| self.get(xy))
     }
 }
 
-#[test]
-pub fn test_terrain_grid() {
-    let options = TerrainOptions::new(default(), UVec2::new(8, 8));
-    let terrain: Terrain = options.into();
-    let size = terrain.size();
+impl<'a, T: Clone> AroundCenter<T> for GridView<'a, Vec<T>> {
+    fn around(&self, center: IVec2) -> Around<Option<T>> {
+        Around::center(center).map(|xy| self.get(xy).cloned())
+    }
+}
+*/
 
-    println!("{:?}", terrain.noise.size());
-
-    let noise: Vec<_> = terrain.noise.iter().collect();
-
-    let rows: Vec<_> = noise.chunks(size.x as usize / 2).collect();
-
-    println!("{:#?}", rows);
-
-    let temp: Vec<_> = rows
-        .into_iter()
-        .map(|row| {
-            row.into_iter()
-                .map(|value| [value, value])
-                .flatten()
-                .collect::<Vec<_>>()
-        })
-        .collect();
-
-    println!("{:#?} {:?}", temp, noise.len());
-
-    let v = GridView::new(&noise, terrain.noise.size().0);
-
-    println!("{:#?}", v.adjacent(IVec2::new(0, 0)));
-    println!("{:#?}", v.adjacent(IVec2::new(1, 0)));
-    println!("{:#?}", v.adjacent(IVec2::new(2, 3)));
+pub trait AroundCenter<Item> {
+    fn around(&self, center: IVec2) -> Around<Option<Item>>;
 }
 
 struct Grid<T> {
@@ -417,11 +399,25 @@ struct Grid<T> {
     items: Vec<T>,
 }
 
-#[allow(dead_code)]
 impl<T> Grid<T> {
     pub fn new(size: (usize, usize), items: Vec<T>) -> Self {
         assert!(size.0 * size.1 == items.len());
         Self { size, items }
+    }
+
+    #[allow(dead_code)]
+    pub fn size(&self) -> (usize, usize) {
+        self.size
+    }
+
+    #[allow(dead_code)]
+    pub fn items(&self) -> &Vec<T> {
+        &self.items
+    }
+
+    #[allow(dead_code)]
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        self.items.iter()
     }
 
     ///
@@ -440,6 +436,7 @@ impl<T> Grid<T> {
     /// I I J J K K L L
     /// I I J J K K L L
     ///
+    #[allow(dead_code)]
     pub fn expand_by(self, by: (usize, usize)) -> Self
     where
         T: Copy,
@@ -501,7 +498,7 @@ impl<T> Grid<T> {
     ///
     pub fn expand(self) -> Grid<Vec<T>>
     where
-        T: Copy + std::fmt::Debug,
+        T: Copy,
     {
         let rows: Vec<Vec<_>> = self
             .items
@@ -533,11 +530,6 @@ impl<T> Grid<T> {
             .windows(2)
             .enumerate()
             .flat_map(|(i, pair)| {
-                let r0: Vec<Vec<_>> = pair[0]
-                    .clone()
-                    .into_iter()
-                    .map(|pair| vec![pair.clone(), pair].into_iter().flatten().collect())
-                    .collect();
                 let r2: Vec<Vec<_>> = pair[1]
                     .clone()
                     .into_iter()
@@ -551,6 +543,12 @@ impl<T> Grid<T> {
                     .collect();
 
                 if i == 0 {
+                    let r0: Vec<Vec<_>> = pair[0]
+                        .clone()
+                        .into_iter()
+                        .map(|pair| vec![pair.clone(), pair].into_iter().flatten().collect())
+                        .collect();
+
                     vec![r0, r1, r2]
                 } else {
                     vec![r1, r2]
@@ -562,6 +560,15 @@ impl<T> Grid<T> {
         let size = (self.size.0 * 2 - 1, self.size.1 * 2 - 1);
 
         Grid::new(size, items)
+    }
+
+    fn get(&self, idx: IVec2) -> Option<&T> {
+        if idx.x >= self.size.0 as i32 || idx.y >= self.size.1 as i32 || idx.x < 0 || idx.y < 0 {
+            None
+        } else {
+            self.items
+                .get(idx.x as usize + idx.y as usize * self.size.0)
+        }
     }
 }
 
@@ -587,6 +594,54 @@ impl<T: std::fmt::Debug> std::fmt::Debug for Grid<T> {
             .field("items", &self.items)
             .finish()
     }
+}
+
+impl From<NoiseMap> for Grid<f64> {
+    fn from(value: NoiseMap) -> Self {
+        Grid::new(value.size(), value.into_iter().collect())
+    }
+}
+
+impl<T: Clone> AroundCenter<T> for Grid<T> {
+    fn around(&self, center: IVec2) -> Around<Option<T>> {
+        Around::center(center).map(|xy| self.get(*xy).cloned())
+    }
+}
+
+#[test]
+pub fn test_grid_2x2_expand() {
+    let grid = Grid::new((2, 2), vec![1, 2, 3, 4]);
+
+    assert_eq!(
+        grid.clone().expand(),
+        Grid::new(
+            (3, 3),
+            vec![
+                vec![1, 1, 1, 1],
+                vec![1, 2, 1, 2],
+                vec![2, 2, 2, 2],
+                vec![1, 1, 3, 3],
+                vec![1, 2, 3, 4],
+                vec![2, 2, 4, 4],
+                vec![3, 3, 3, 3],
+                vec![3, 4, 3, 4],
+                vec![4, 4, 4, 4]
+            ]
+        )
+    );
+
+    assert_eq!(
+        grid.expand_by((2, 2)),
+        Grid::new(
+            (4, 4),
+            vec![
+                1, 1, 2, 2, //
+                1, 1, 2, 2, //
+                3, 3, 4, 4, //
+                3, 3, 4, 4, //
+            ]
+        )
+    );
 }
 
 #[test]
@@ -659,37 +714,25 @@ pub fn test_grid_4x4_expand() {
 }
 
 #[test]
-pub fn test_grid_2x2_expand() {
-    let grid = Grid::new((2, 2), vec![1, 2, 3, 4]);
+pub fn test_grid_32x32_expand() {
+    let grid = Grid::new((32, 32), (1..32 * 32 + 1).into_iter().collect()).expand();
 
-    assert_eq!(
-        grid.clone().expand(),
-        Grid::new(
-            (3, 3),
-            vec![
-                vec![1, 1, 1, 1],
-                vec![1, 2, 1, 2],
-                vec![2, 2, 2, 2],
-                vec![1, 1, 3, 3],
-                vec![1, 2, 3, 4],
-                vec![2, 2, 4, 4],
-                vec![3, 3, 3, 3],
-                vec![3, 4, 3, 4],
-                vec![4, 4, 4, 4]
-            ]
-        )
-    );
+    assert_eq!(grid.size(), (63, 63));
+}
 
-    assert_eq!(
-        grid.expand_by((2, 2)),
-        Grid::new(
-            (4, 4),
-            vec![
-                1, 1, 2, 2, //
-                1, 1, 2, 2, //
-                3, 3, 4, 4, //
-                3, 3, 4, 4, //
-            ]
-        )
-    );
+#[test]
+pub fn test_terrain_grid() {
+    let options = TerrainOptions::new(default(), UVec2::new(8, 8));
+    let terrain: Terrain = options.into();
+    let noise: Grid<f64> = terrain.noise.into();
+
+    println!("{:#?}", noise.around(IVec2::new(0, 0)));
+    println!("{:#?}", noise.around(IVec2::new(1, 0)));
+    println!("{:#?}", noise.around(IVec2::new(2, 3)));
+
+    let noise = noise.expand();
+
+    println!("{:#?}", noise.around(IVec2::new(0, 0)));
+    println!("{:#?}", noise.around(IVec2::new(1, 0)));
+    println!("{:#?}", noise.around(IVec2::new(2, 3)));
 }
