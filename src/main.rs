@@ -48,7 +48,7 @@ fn main() {
         // .add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new())
         // .add_plugins(RapierDebugRenderPlugin::default())
         // .add_plugins(LogDiagnosticsPlugin::default())
-        .add_plugins(FrameTimeDiagnosticsPlugin::default())
+        .add_plugins(FrameTimeDiagnosticsPlugin)
         .add_plugins(helpers::HelpersPlugin)
         .add_plugins(camera::CameraPlugin)
         .add_plugins(devel::DeveloperPlugin)

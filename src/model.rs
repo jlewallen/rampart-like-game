@@ -172,14 +172,15 @@ impl Coordinates {
     }
 }
 
-impl Into<Vec2Usize> for Coordinates {
-    fn into(self) -> Vec2Usize {
-        self.0
+impl From<Coordinates> for Vec2Usize {
+    fn from(value: Coordinates) -> Self {
+        value.0
     }
 }
 
-#[derive(Component, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Component, Clone, Default, Debug, PartialEq, Eq, Hash)]
 pub enum Player {
+    #[default]
     One,
     Two,
 }
@@ -190,12 +191,6 @@ impl Player {
             Player::One => Player::Two,
             Player::Two => Player::One,
         }
-    }
-}
-
-impl Default for Player {
-    fn default() -> Player {
-        Player::One
     }
 }
 

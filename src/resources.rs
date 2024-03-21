@@ -51,17 +51,17 @@ pub fn load_structures(
 pub const HIGHLIGHT_TINT: Highlight<StandardMaterial> = Highlight {
     hovered: Some(HighlightKind::new_dynamic(|matl| StandardMaterial {
         // base_color: matl.base_color + Color::rgba(-0.2, -0.2, 0.4, 0.0),
-        base_color: Color::rgb(0.35, 0.35, 0.35).into(),
+        base_color: Color::rgb(0.35, 0.35, 0.35),
         ..matl.to_owned()
     })),
     pressed: Some(HighlightKind::new_dynamic(|matl| StandardMaterial {
         // base_color: matl.base_color + Color::rgba(-0.3, -0.3, 0.5, 0.0),
-        base_color: Color::rgb(0.35, 0.75, 0.35).into(),
+        base_color: Color::rgb(0.35, 0.75, 0.35),
         ..matl.to_owned()
     })),
     selected: Some(HighlightKind::new_dynamic(|matl| StandardMaterial {
         // base_color: matl.base_color + Color::rgba(-0.3, 0.2, -0.3, 0.0),
-        base_color: Color::rgb(0.35, 0.35, 0.75).into(),
+        base_color: Color::rgb(0.35, 0.35, 0.75),
         ..matl.to_owned()
     })),
 };

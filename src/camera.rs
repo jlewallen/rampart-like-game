@@ -2,17 +2,13 @@ use bevy::prelude::*;
 use bevy_rts_camera::{RtsCamera, RtsCameraControls, RtsCameraPlugin};
 
 #[allow(dead_code)]
+#[derive(Default)]
 enum CameraMode {
+    #[default]
     Rts,
     Normal,
     TopDown,
     CloseSide,
-}
-
-impl Default for CameraMode {
-    fn default() -> Self {
-        CameraMode::Rts
-    }
 }
 
 impl CameraMode {}

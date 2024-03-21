@@ -87,14 +87,14 @@ impl Terrain {
         let local = position + self.world_to_local();
         let local = local.xz();
 
-        if local.x > self.options.size.x as f32 || local.y > self.options.size.y as f32 {
+        if local.x > self.options.size.x as f32
+            || local.y > self.options.size.y as f32
+            || local.x < 0.0
+            || local.y < 0.0
+        {
             None
         } else {
-            if local.x < 0.0 || local.y < 0.0 {
-                None
-            } else {
-                Some(local.as_uvec2())
-            }
+            Some(local.as_uvec2())
         }
     }
 
@@ -138,11 +138,11 @@ impl std::fmt::Debug for Terrain {
     }
 }
 
-impl Into<Terrain> for TerrainOptions {
-    fn into(self) -> Terrain {
-        Terrain {
-            noise: self.noise(),
-            options: self.into(),
+impl From<TerrainOptions> for Terrain {
+    fn from(value: TerrainOptions) -> Self {
+        Self {
+            noise: value.noise(),
+            options: value,
         }
     }
 }
@@ -158,16 +158,14 @@ impl Meshable for Terrain {
         info!("size={:?} offset={:?}", size, offset);
 
         let grid_noise: Vec<_> = (0..size.y)
-            .into_iter()
-            .map(|r| {
-                (0..size.x).into_iter().map(move |c| {
+            .flat_map(|r| {
+                (0..size.x).map(move |c| {
                     let grid = UVec2::new(c, r);
                     let index = grid / resolution;
                     let value = self.noise[(index.x as usize, index.y as usize)];
                     (grid, value as f32)
                 })
             })
-            .flatten()
             .collect();
 
         let positions: Vec<_> = grid_noise
@@ -180,7 +178,7 @@ impl Meshable for Terrain {
 
         info!(
             "min={:?} max={:?}",
-            positions.iter().next(),
+            positions.first(),
             positions.iter().last()
         );
 
@@ -197,9 +195,8 @@ impl Meshable for Terrain {
         let normals: Vec<Vec3> = grid_noise.iter().map(|_| Vec3::Y).collect();
 
         let indices: Vec<_> = (0..size.y - 1)
-            .into_iter()
-            .map(|r| {
-                (0..size.x - 1).into_iter().map(move |c| {
+            .flat_map(|r| {
+                (0..size.x - 1).map(move |c| {
                     let i = r * size.x;
                     let l = (r + 1) * size.x;
                     vec![
@@ -213,10 +210,7 @@ impl Meshable for Terrain {
                 })
             })
             .flatten()
-            .flatten()
             .collect();
-
-        let indices: Vec<_> = indices.into_iter().map(|v| v as u32).collect();
 
         Mesh::new(
             PrimitiveTopology::TriangleList,
@@ -454,15 +448,13 @@ impl<T> Grid<T> {
         let items: Vec<_> = self
             .items
             .into_iter()
-            .map(|v| (0..by.0).map(move |_| v))
-            .flatten()
+            .flat_map(|v| (0..by.0).map(move |_| v))
             .collect::<Vec<_>>()
             .chunks(size.0)
-            .map(|row| {
-                let row: Vec<_> = row.into_iter().map(|v| *v).collect();
+            .flat_map(|row| {
+                let row: Vec<_> = row.to_vec();
                 (0..by.1).map(move |_| row.clone())
             })
-            .flatten()
             .flatten()
             .collect();
 
@@ -514,22 +506,15 @@ impl<T> Grid<T> {
         let rows: Vec<Vec<_>> = self
             .items
             .chunks(self.size.0)
-            .map(|row| row.into_iter().collect::<Vec<_>>())
+            .map(|row| row.iter().collect::<Vec<_>>())
             .collect();
-
-        println!("rows.0 = {:?}", rows);
 
         let items: Vec<Vec<Vec<T>>> = rows
             .into_iter()
             .map(|row| {
-                // println!("row = {:?}", row);
-
-                let row = row
-                    .windows(2)
+                row.windows(2)
                     .enumerate()
                     .flat_map(|(i, pair)| {
-                        //println!("pair = {:?}", pair);
-
                         if i == 0 {
                             vec![
                                 vec![*pair[0], *pair[0]],
@@ -540,22 +525,14 @@ impl<T> Grid<T> {
                             vec![vec![*pair[0], *pair[1]], vec![*pair[1], *pair[1]]]
                         }
                     })
-                    .collect::<Vec<Vec<T>>>();
-
-                // println!("row = {:?}", row);
-
-                row
+                    .collect::<Vec<Vec<T>>>()
             })
             .collect();
-
-        for cell in items.iter() {
-            println!("row = {:?}", cell);
-        }
 
         let items: Vec<Vec<T>> = items
             .windows(2)
             .enumerate()
-            .map(|(i, pair)| {
+            .flat_map(|(i, pair)| {
                 let r0: Vec<Vec<_>> = pair[0]
                     .clone()
                     .into_iter()
@@ -569,13 +546,9 @@ impl<T> Grid<T> {
                 let r1: Vec<Vec<_>> = pair[0]
                     .clone()
                     .into_iter()
-                    .zip(pair[1].clone().into_iter())
+                    .zip(pair[1].clone())
                     .map(|(t, b)| vec![t, b].into_iter().flatten().collect())
                     .collect();
-
-                println!("r0 = {:?}", r0);
-                println!("r1 = {:?}", r1);
-                println!("r2 = {:?}", r2);
 
                 if i == 0 {
                     vec![r0, r1, r2]
@@ -584,13 +557,9 @@ impl<T> Grid<T> {
                 }
             })
             .flatten()
-            .flatten()
             .collect();
 
         let size = (self.size.0 * 2 - 1, self.size.1 * 2 - 1);
-
-        // println!("size = {:?}", size);
-        // println!("items.final = {:#?} ({:?})", items, items.len());
 
         Grid::new(size, items)
     }
@@ -605,7 +574,7 @@ impl<T: PartialEq> PartialEq for Grid<T> {
 impl<T: Clone> Clone for Grid<T> {
     fn clone(&self) -> Self {
         Self {
-            size: self.size.clone(),
+            size: self.size,
             items: self.items.clone(),
         }
     }

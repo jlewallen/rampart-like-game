@@ -258,7 +258,7 @@ fn keyboard(
     if keys.just_pressed(KeyCode::KeyB) {
         info!("{:?}", KeyCode::KeyB);
 
-        if let Some((entity, _)) = placing.get_single().ok() {
+        if let Ok((entity, _)) = placing.get_single() {
             commands.entity(entity).despawn_recursive();
         }
 
