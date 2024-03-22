@@ -17,7 +17,9 @@ use noise::{
 };
 use std::time::Duration;
 
-use super::model::Around;
+// use crate::AroundCenter;
+
+// use super::model::Grid;
 use super::model::Seed;
 
 #[derive(Clone, Default, Debug)]
@@ -42,17 +44,11 @@ struct TerrainOptions {
     /// Size of the terrain in grid tiles. This means that there will be an
     /// extra row and column of vertices in the generated mesh.
     size: UVec2,
-    /// Resolution of the terrain noise, (2, 2) is a good default.
-    resolution: UVec2,
 }
 
 impl TerrainOptions {
     fn new(seed: TerrainSeed, size: UVec2) -> Self {
-        Self {
-            seed,
-            size,
-            resolution: UVec2::splat(2),
-        }
+        Self { seed, size }
     }
 
     fn noise(&self) -> NoiseMap {
@@ -65,10 +61,8 @@ impl TerrainOptions {
             .add_control_point(1.0)
             .invert_terraces(true);
 
-        let size = self.size / self.resolution;
-
         PlaneMapBuilder::new(terraced)
-            .set_size(size.x as usize, size.y as usize)
+            .set_size(self.size.x as usize, self.size.y as usize)
             .build()
     }
 }
@@ -79,7 +73,7 @@ pub struct Water {}
 #[derive(Component)]
 pub struct Terrain {
     options: TerrainOptions,
-    noise: Grid<f64>,
+    grid: SquareGrid<HeightOnlyCell>,
 }
 
 impl Terrain {
@@ -101,12 +95,9 @@ impl Terrain {
     pub fn survey(&self, position: Vec3) -> Option<Survey> {
         match self.world_to_grid(position) {
             Some(index) => {
-                let noise: Grid<f64> = self.noise.clone();
-                let noise = noise.expand();
-                let around = noise.around(index.as_ivec2());
-
-                info!("{:#?}", index.as_ivec2());
-                info!("{:#?}", around);
+                // let around = grid.around(index.as_ivec2());
+                // info!("{:#?}", index.as_ivec2());
+                // info!("{:?}", around);
 
                 None
             }
@@ -116,6 +107,10 @@ impl Terrain {
 
     fn size(&self) -> UVec2 {
         self.options.size
+    }
+
+    fn local_to_world(&self) -> Vec3 {
+        -self.world_to_local()
     }
 
     fn world_to_local(&self) -> Vec3 {
@@ -142,8 +137,15 @@ impl std::fmt::Debug for Terrain {
 
 impl From<TerrainOptions> for Terrain {
     fn from(value: TerrainOptions) -> Self {
+        let flat: SquareGrid<()> = SquareGrid::new_flat(value.size);
+        let mapping = RectangularMapping::new(value.noise());
+        let grid = flat.map(|p, _| {
+            let value = mapping.get(p);
+            HeightOnlyCell::new(value)
+        });
+
         Self {
-            noise: value.noise().into(),
+            grid,
             options: value,
         }
     }
@@ -153,80 +155,7 @@ impl Meshable for Terrain {
     type Output = Mesh;
 
     fn mesh(&self) -> Self::Output {
-        let resolution = self.options.resolution;
-        let size = self.options.size + UVec2::ONE;
-        let offset: Vec2 = (size - UVec2::ONE).as_vec2() * Vec2::splat(-0.5);
-
-        info!("size={:?} offset={:?}", size, offset);
-
-        let grid_noise: Vec<_> = (0..size.y)
-            .flat_map(|r| {
-                (0..size.x).map(move |c| {
-                    let grid = UVec2::new(c, r);
-                    let index = grid / resolution;
-                    let value = self
-                        .noise
-                        .get(IVec2::new(index.x as i32, index.y as i32))
-                        .copied()
-                        .unwrap_or_default();
-                    (grid, value as f32)
-                })
-            })
-            .collect();
-
-        let positions: Vec<_> = grid_noise
-            .iter()
-            .map(|(grid, value)| {
-                let p = grid.as_vec2() + offset;
-                Vec3::new(p.x, *value * 2.0, p.y)
-            })
-            .collect();
-
-        info!(
-            "min={:?} max={:?}",
-            positions.first(),
-            positions.iter().last()
-        );
-
-        let uvs: Vec<_> = grid_noise
-            .iter()
-            .map(|(grid, _)| grid.as_vec2() / size.as_vec2())
-            .collect();
-
-        let colors: Vec<[f32; 4]> = grid_noise
-            .iter()
-            .map(|(_grid, value)| get_color(*value).as_rgba_f32())
-            .collect();
-
-        let normals: Vec<Vec3> = grid_noise.iter().map(|_| Vec3::Y).collect();
-
-        let indices: Vec<_> = (0..size.y - 1)
-            .flat_map(|r| {
-                (0..size.x - 1).map(move |c| {
-                    let i = r * size.x;
-                    let l = (r + 1) * size.x;
-                    vec![
-                        i + c,     // This zips two rows of vertices together.
-                        l + c,     // i is the top row
-                        l + c + 1, // l is the one below
-                        i + c,     //
-                        l + c + 1, //
-                        i + c + 1, //
-                    ]
-                })
-            })
-            .flatten()
-            .collect();
-
-        Mesh::new(
-            PrimitiveTopology::TriangleList,
-            RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
-        )
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors)
-        .with_inserted_indices(Indices::U32(indices))
+        self.grid.mesh()
     }
 }
 
@@ -346,393 +275,338 @@ fn get_color(val: f32) -> Color {
     color.expect("bad color")
 }
 
-/*
-pub struct GridView<'a, T> {
-    width: usize,
-    target: &'a T,
+#[allow(dead_code)]
+pub struct SquareGrid<T> {
+    size: UVec2,
+    cells: Vec<T>,
 }
 
-impl<'a, T> GridView<'a, T> {
-    pub fn new(target: &'a T, width: usize) -> Self {
-        Self { width, target }
-    }
-}
-
-impl<'a, V> GridView<'a, Vec<V>> {
-    fn get(&self, p: &IVec2) -> Option<&V> {
-        let index = p.y * (self.width as i32) + p.x;
-        self.target.get(index as usize)
-    }
-}
-
-impl<'a> GridView<'a, NoiseMap> {
-    fn get(&self, p: &IVec2) -> Option<f64> {
-        let size = self.target.size();
-
-        if p.x >= 0 && p.y >= 0 && p.x < size.0 as i32 && p.y < size.1 as i32 {
-            Some(self.target.get_value(p.x as usize, p.y as usize))
-        } else {
-            None
-        }
-    }
-}
-
-impl<'a> AroundCenter<f64> for GridView<'a, NoiseMap> {
-    fn around(&self, center: IVec2) -> Around<Option<f64>> {
-        Around::center(center).map(|xy| self.get(xy))
-    }
-}
-
-impl<'a, T: Clone> AroundCenter<T> for GridView<'a, Vec<T>> {
-    fn around(&self, center: IVec2) -> Around<Option<T>> {
-        Around::center(center).map(|xy| self.get(xy).cloned())
-    }
-}
-*/
-
-pub trait AroundCenter<Item> {
-    fn around(&self, center: IVec2) -> Around<Option<Item>>;
-}
-
-struct Grid<T> {
-    size: (usize, usize),
-    items: Vec<T>,
-}
-
-impl<T> Grid<T> {
-    pub fn new(size: (usize, usize), items: Vec<T>) -> Self {
-        assert!(size.0 * size.1 == items.len());
-        Self { size, items }
+#[allow(dead_code)]
+impl<T> SquareGrid<T> {
+    pub fn new(size: UVec2, cells: Vec<T>) -> Self {
+        assert!((size.x * size.y) as usize == cells.len());
+        Self { size, cells }
     }
 
-    #[allow(dead_code)]
-    pub fn size(&self) -> (usize, usize) {
-        self.size
+    pub fn into_cells(self) -> Vec<T> {
+        self.cells
     }
 
-    #[allow(dead_code)]
-    pub fn items(&self) -> &Vec<T> {
-        &self.items
-    }
-
-    #[allow(dead_code)]
-    pub fn iter(&self) -> impl Iterator<Item = &T> {
-        self.items.iter()
-    }
-
-    ///
-    /// If we start with this:
-    ///
-    /// A B C D
-    /// E F G H
-    /// I J K L
-    ///
-    /// expand((2, 2)) will produce this:
-    ///
-    /// A A B B C C D D
-    /// A A B B C C D D
-    /// E E F F G G H H
-    /// E E F F G G H H
-    /// I I J J K K L L
-    /// I I J J K K L L
-    ///
-    #[allow(dead_code)]
-    pub fn expand_by(self, by: (usize, usize)) -> Self
-    where
-        T: Copy,
-    {
-        let size = (self.size.0 * by.0, self.size.1 * by.1);
-        let items: Vec<_> = self
-            .items
-            .into_iter()
-            .flat_map(|v| (0..by.0).map(move |_| v))
-            .collect::<Vec<_>>()
-            .chunks(size.0)
-            .flat_map(|row| {
-                let row: Vec<_> = row.to_vec();
-                (0..by.1).map(move |_| row.clone())
-            })
-            .flatten()
-            .collect();
-
-        Self::new(size, items)
-    }
-
-    /// A B C D
-    /// E F G H
-    /// I J K L
-    ///
-    /// [ A A   [ A B   [ B B   [ B C   [ C C   [ C D   [ D D
-    ///   A A ]   A B ]   B B ]   B C ]   C C ]   C D ]   D D ]
-    ///
-    /// [ A A   [ A B   [ B B   [ B C   [ C C   [ C D   [ D D
-    ///   E E ]   E F ]   F F ]   F G ]   G G ]   G H ]   H H ]
-    ///
-    /// [ E E   [ E F   [ F F   [ F G   [ G G   [ G H   [ H H
-    ///   E E ]   E F ]   F F ]   F G ]   G G ]   G H ]   H H ]
-    ///
-    /// [ E E   [ E F   [ F F   [ F G   [ G G   [ G H   [ H H
-    ///   I I ]   I J ]   J J ]   J K ]   K K ]   K L ]   L L ]
-    ///
-    /// [ I I   [ I J   [ J J   [ J K   [ K K   [ K L   [ L L
-    ///   I I ]   I J ]   J J ]   J K ]   K K ]   K L ]   L L ]
-    ///
-    /// etc
-    ///
-    /// A B
-    /// C D
-    ///
-    /// A A B B
-    /// A A B B
-    /// C C D D
-    /// C C D D
-    ///
-    /// AA AB BB
-    /// AA AB BB
-    ///
-    /// AA AB BB
-    /// CC CD DD
-    ///
-    /// CC CD DD
-    /// CC CD DD
-    ///
-    pub fn expand(self) -> Grid<Vec<T>>
-    where
-        T: Copy,
-    {
-        let rows: Vec<Vec<_>> = self
-            .items
-            .chunks(self.size.0)
-            .map(|row| row.iter().collect::<Vec<_>>())
-            .collect();
-
-        let items: Vec<Vec<Vec<T>>> = rows
-            .into_iter()
-            .map(|row| {
-                row.windows(2)
-                    .enumerate()
-                    .flat_map(|(i, pair)| {
-                        if i == 0 {
-                            vec![
-                                vec![*pair[0], *pair[0]],
-                                vec![*pair[0], *pair[1]],
-                                vec![*pair[1], *pair[1]],
-                            ]
-                        } else {
-                            vec![vec![*pair[0], *pair[1]], vec![*pair[1], *pair[1]]]
-                        }
-                    })
-                    .collect::<Vec<Vec<T>>>()
-            })
-            .collect();
-
-        let items: Vec<Vec<T>> = items
-            .windows(2)
+    pub fn apply_mut<V>(&mut self, mut map_fn: impl FnMut(UVec2, &mut T) -> V) -> SquareGrid<V> {
+        let cells = self
+            .cells
+            .iter_mut()
             .enumerate()
-            .flat_map(|(i, pair)| {
-                let r2: Vec<Vec<_>> = pair[1]
-                    .clone()
-                    .into_iter()
-                    .map(|pair| vec![pair.clone(), pair].into_iter().flatten().collect())
-                    .collect();
-                let r1: Vec<Vec<_>> = pair[0]
-                    .clone()
-                    .into_iter()
-                    .zip(pair[1].clone())
-                    .map(|(t, b)| vec![t, b].into_iter().flatten().collect())
-                    .collect();
-
-                if i == 0 {
-                    let r0: Vec<Vec<_>> = pair[0]
-                        .clone()
-                        .into_iter()
-                        .map(|pair| vec![pair.clone(), pair].into_iter().flatten().collect())
-                        .collect();
-
-                    vec![r0, r1, r2]
-                } else {
-                    vec![r1, r2]
-                }
+            .map(|(index, value)| {
+                let x = index as u32 % self.size.x;
+                let y = index as u32 / self.size.x;
+                map_fn(UVec2::new(x, y), value)
             })
-            .flatten()
             .collect();
 
-        let size = (self.size.0 * 2 - 1, self.size.1 * 2 - 1);
-
-        Grid::new(size, items)
+        SquareGrid::new(self.size, cells)
     }
 
-    fn get(&self, idx: IVec2) -> Option<&T> {
-        if idx.x >= self.size.0 as i32 || idx.y >= self.size.1 as i32 || idx.x < 0 || idx.y < 0 {
-            None
-        } else {
-            self.items
-                .get(idx.x as usize + idx.y as usize * self.size.0)
-        }
+    pub fn apply<V>(&self, mut map_fn: impl FnMut(UVec2, &T) -> V) -> SquareGrid<V> {
+        let cells = self
+            .cells
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                let x = index as u32 % self.size.x;
+                let y = index as u32 / self.size.x;
+                map_fn(UVec2::new(x, y), value)
+            })
+            .collect();
+
+        SquareGrid::new(self.size, cells)
+    }
+
+    pub fn map<V>(self, mut map_fn: impl FnMut(UVec2, T) -> V) -> SquareGrid<V> {
+        let cells = self
+            .cells
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| {
+                let x = index as u32 % self.size.x;
+                let y = index as u32 / self.size.x;
+                map_fn(UVec2::new(x, y), value)
+            })
+            .collect();
+
+        SquareGrid::new(self.size, cells)
     }
 }
 
-impl<T: PartialEq> PartialEq for Grid<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.size == other.size && self.items == other.items
+#[allow(dead_code)]
+impl<T> SquareGrid<T>
+where
+    T: Default + Clone,
+{
+    pub fn new_flat(size: UVec2) -> Self {
+        Self::new(size, vec![T::default(); (size.x * size.y) as usize])
     }
 }
 
-impl<T: Clone> Clone for Grid<T> {
+impl<T: Clone> Clone for SquareGrid<T> {
     fn clone(&self) -> Self {
         Self {
-            size: self.size,
-            items: self.items.clone(),
+            size: self.size.clone(),
+            cells: self.cells.clone(),
         }
     }
 }
 
-impl<T: std::fmt::Debug> std::fmt::Debug for Grid<T> {
+impl<T: std::fmt::Debug> std::fmt::Debug for SquareGrid<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Grid")
+        f.debug_struct("SquareGrid")
             .field("size", &self.size)
-            .field("items", &self.items)
+            .field("cells", &self.cells)
             .finish()
     }
 }
 
-impl From<NoiseMap> for Grid<f64> {
-    fn from(value: NoiseMap) -> Self {
-        Grid::new(value.size(), value.into_iter().collect())
+#[derive(Debug)]
+pub struct HeightOnlyCell([f64; 4]);
+
+impl HeightOnlyCell {
+    pub fn new(value: [f64; 4]) -> Self {
+        Self(value)
     }
 }
 
-impl<T: Clone> AroundCenter<T> for Grid<T> {
-    fn around(&self, center: IVec2) -> Around<Option<T>> {
-        Around::center(center).map(|xy| self.get(*xy).cloned())
+impl Meshable for HeightOnlyCell {
+    type Output = Mesh;
+
+    fn mesh(&self) -> Self::Output {
+        let half_size = Vec2::ONE / 2.0;
+        let rotation = Quat::from_rotation_arc(Vec3::Y, Vec3::Y);
+        let positions = vec![
+            rotation * Vec3::new(-half_size.x, self.0[0] as f32, -half_size.y),
+            rotation * Vec3::new(-half_size.x, self.0[2] as f32, half_size.y),
+            rotation * Vec3::new(half_size.x, self.0[3] as f32, half_size.y),
+            rotation * Vec3::new(half_size.x, self.0[1] as f32, -half_size.y),
+        ];
+
+        let normals = vec![Vec3::Y.to_array(); 4];
+        let uvs = vec![[1.0, 0.0], [0.0, 0.0], [0.0, 1.0], [1.0, 1.0]];
+        let indices = Indices::U32(vec![0, 1, 2, 0, 2, 3]);
+
+        Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        )
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+        .with_inserted_attribute(
+            Mesh::ATTRIBUTE_COLOR,
+            vec![Vec4::ONE, Vec4::ONE, Vec4::ONE, Vec4::ONE],
+        )
+        .with_inserted_indices(indices)
+    }
+}
+
+impl<T> Meshable for SquareGrid<T>
+where
+    T: Meshable<Output = Mesh>,
+{
+    type Output = Mesh;
+
+    fn mesh(&self) -> Self::Output {
+        let size = self.size.as_vec2();
+        let all = (Vec3::new(size.x, 0.0, size.y) / -2.0) + Vec3::new(0., 0.1, 0.);
+
+        let meshes = self
+            .apply(|p, cell| {
+                let local = Vec3::new(p.x as f32, 0.0, p.y as f32) + all;
+                cell.mesh().translated_by(local)
+            })
+            .into_cells();
+
+        let empty = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        )
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, Vec::<Vec3>::default())
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, Vec::<Vec3>::default())
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, Vec::<Vec2>::default())
+        .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, Vec::<Vec4>::default())
+        .with_inserted_indices(Indices::U32(Default::default()));
+
+        meshes.into_iter().fold(empty, |mut all, m| {
+            all.merge(m);
+            all
+        })
+    }
+}
+
+/// Maps values from 2-dimensional structures to 4 array values based on the
+/// surrounding values of the coordinate. Specifically such that odd coordinates
+/// include adjacent values from the original, and even coordinates include the
+/// same values. I've agonized over the name of this and how to better approach
+/// this problem. I'm hoping the test goes a long way to explaining what's
+/// happening.
+pub struct RectangularMapping<T> {
+    map: T,
+}
+
+impl<T> RectangularMapping<T> {
+    fn new(map: T) -> Self {
+        Self { map }
+    }
+
+    fn map_coordinates(&self, p: UVec2) -> (UVec2, UVec2, UVec2, UVec2) {
+        let x = p.x;
+        let y = p.y;
+
+        match (x % 2 == 0, y % 2 == 0) {
+            (true, false) => (
+                UVec2::new(x / 2, (y - 1) / 2),
+                UVec2::new(x / 2, (y - 1) / 2),
+                UVec2::new(x / 2, (y - 1) / 2 + 1),
+                UVec2::new(x / 2, (y - 1) / 2 + 1),
+            ),
+            (false, true) => (
+                UVec2::new((x - 1) / 2, y / 2),
+                UVec2::new((x - 1) / 2 + 1, y / 2),
+                UVec2::new((x - 1) / 2, y / 2),
+                UVec2::new((x - 1) / 2 + 1, y / 2),
+            ),
+            (false, false) => (
+                UVec2::new((x - 1) / 2, (y - 1) / 2),
+                UVec2::new((x - 1) / 2 + 1, (y - 1) / 2),
+                UVec2::new((x - 1) / 2, (y - 1) / 2 + 1),
+                UVec2::new((x - 1) / 2 + 1, (y - 1) / 2 + 1),
+            ),
+            (true, true) => {
+                let idx = UVec2::new(x / 2, y / 2);
+                (idx, idx, idx, idx)
+            }
+        }
+    }
+}
+
+#[allow(dead_code)]
+impl<T> RectangularMapping<Vec<Vec<T>>>
+where
+    T: Default + Copy,
+{
+    fn get(&self, p: UVec2) -> [T; 4] {
+        let (c0, c1, c2, c3) = self.map_coordinates(p);
+
+        [
+            self.map[c0.y as usize][c0.x as usize],
+            self.map[c1.y as usize][c1.x as usize],
+            self.map[c2.y as usize][c2.x as usize],
+            self.map[c3.y as usize][c3.x as usize],
+        ]
+    }
+}
+
+impl RectangularMapping<NoiseMap> {
+    fn get(&self, p: UVec2) -> [f64; 4] {
+        let (c0, c1, c2, c3) = self.map_coordinates(p);
+
+        [
+            self.map.get_value(c0.x as usize, c0.y as usize),
+            self.map.get_value(c1.x as usize, c1.y as usize),
+            self.map.get_value(c2.x as usize, c2.y as usize),
+            self.map.get_value(c3.x as usize, c3.y as usize),
+        ]
     }
 }
 
 #[test]
-pub fn test_grid_2x2_expand() {
-    let grid = Grid::new((2, 2), vec![1, 2, 3, 4]);
+fn test_rectangular_mapping_map_coordinates() {
+    // [ 0,  1,  2,  3,  4,  5]
+    // [ 6,  7,  8,  9, 10, 11]
+    // [12, 13, 14, 15, 16, 17]
+    // [18, 19, 20, 21, 22, 23]
+    // [24, 25, 26, 27, 28, 29]
+    // [30, 31, 32, 33, 34, 35]
+    let data = (0..6)
+        .into_iter()
+        .map(|row| ((row * 6)..((row + 1) * 6)).into_iter().collect::<Vec<_>>())
+        .collect::<Vec<_>>();
 
+    let map = RectangularMapping::new(data);
     assert_eq!(
-        grid.clone().expand(),
-        Grid::new(
-            (3, 3),
-            vec![
-                vec![1, 1, 1, 1],
-                vec![1, 2, 1, 2],
-                vec![2, 2, 2, 2],
-                vec![1, 1, 3, 3],
-                vec![1, 2, 3, 4],
-                vec![2, 2, 4, 4],
-                vec![3, 3, 3, 3],
-                vec![3, 4, 3, 4],
-                vec![4, 4, 4, 4]
-            ]
+        map.map_coordinates(UVec2::new(0, 0)),
+        (
+            UVec2::new(0, 0),
+            UVec2::new(0, 0),
+            UVec2::new(0, 0),
+            UVec2::new(0, 0)
         )
     );
-
     assert_eq!(
-        grid.expand_by((2, 2)),
-        Grid::new(
-            (4, 4),
-            vec![
-                1, 1, 2, 2, //
-                1, 1, 2, 2, //
-                3, 3, 4, 4, //
-                3, 3, 4, 4, //
-            ]
+        map.map_coordinates(UVec2::new(1, 1)),
+        (
+            UVec2::new(0, 0),
+            UVec2::new(1, 0),
+            UVec2::new(0, 1),
+            UVec2::new(1, 1)
         )
     );
-}
-
-#[test]
-pub fn test_grid_4x4_expand() {
-    let grid = Grid::new((4, 4), (1..17).into_iter().collect());
-
     assert_eq!(
-        grid.clone().expand(),
-        Grid::new(
-            (7, 7),
-            vec![
-                vec![1, 1, 1, 1],
-                vec![1, 2, 1, 2],
-                vec![2, 2, 2, 2],
-                vec![2, 3, 2, 3],
-                vec![3, 3, 3, 3],
-                vec![3, 4, 3, 4],
-                vec![4, 4, 4, 4],
-                //
-                vec![1, 1, 5, 5],
-                vec![1, 2, 5, 6],
-                vec![2, 2, 6, 6],
-                vec![2, 3, 6, 7],
-                vec![3, 3, 7, 7],
-                vec![3, 4, 7, 8],
-                vec![4, 4, 8, 8],
-                //
-                vec![5, 5, 5, 5],
-                vec![5, 6, 5, 6],
-                vec![6, 6, 6, 6],
-                vec![6, 7, 6, 7],
-                vec![7, 7, 7, 7],
-                vec![7, 8, 7, 8],
-                vec![8, 8, 8, 8],
-                //
-                vec![5, 5, 9, 9],
-                vec![5, 6, 9, 10],
-                vec![6, 6, 10, 10],
-                vec![6, 7, 10, 11],
-                vec![7, 7, 11, 11],
-                vec![7, 8, 11, 12],
-                vec![8, 8, 12, 12],
-                //
-                vec![9, 9, 9, 9],
-                vec![9, 10, 9, 10],
-                vec![10, 10, 10, 10],
-                vec![10, 11, 10, 11],
-                vec![11, 11, 11, 11],
-                vec![11, 12, 11, 12],
-                vec![12, 12, 12, 12],
-                //
-                vec![9, 9, 13, 13],
-                vec![9, 10, 13, 14],
-                vec![10, 10, 14, 14],
-                vec![10, 11, 14, 15],
-                vec![11, 11, 15, 15],
-                vec![11, 12, 15, 16],
-                vec![12, 12, 16, 16],
-                //
-                vec![13, 13, 13, 13],
-                vec![13, 14, 13, 14],
-                vec![14, 14, 14, 14],
-                vec![14, 15, 14, 15],
-                vec![15, 15, 15, 15],
-                vec![15, 16, 15, 16],
-                vec![16, 16, 16, 16],
-            ]
+        map.map_coordinates(UVec2::new(0, 2)),
+        (
+            UVec2::new(0, 1),
+            UVec2::new(0, 1),
+            UVec2::new(0, 1),
+            UVec2::new(0, 1)
+        )
+    );
+    assert_eq!(
+        map.map_coordinates(UVec2::new(5, 5)),
+        (
+            UVec2::new(2, 2),
+            UVec2::new(3, 2),
+            UVec2::new(2, 3),
+            UVec2::new(3, 3)
         )
     );
 }
 
 #[test]
-pub fn test_grid_32x32_expand() {
-    let grid = Grid::new((32, 32), (1..32 * 32 + 1).into_iter().collect()).expand();
+fn test_rectangular_mapping_map_vec_vec() {
+    // [ 0,  1,  2,  3,  4,  5]
+    // [ 6,  7,  8,  9, 10, 11]
+    // [12, 13, 14, 15, 16, 17]
+    // [18, 19, 20, 21, 22, 23]
+    // [24, 25, 26, 27, 28, 29]
+    // [30, 31, 32, 33, 34, 35]
+    let data = (0..6)
+        .into_iter()
+        .map(|row| ((row * 6)..((row + 1) * 6)).into_iter().collect::<Vec<_>>())
+        .collect::<Vec<_>>();
 
-    assert_eq!(grid.size(), (63, 63));
+    let map = RectangularMapping::new(data);
+    assert_eq!(map.get(UVec2::new(0, 0)), [0, 0, 0, 0]);
+    assert_eq!(map.get(UVec2::new(1, 1)), [0, 1, 6, 7]);
+    assert_eq!(map.get(UVec2::new(1, 0)), [0, 1, 0, 1]);
+    assert_eq!(map.get(UVec2::new(2, 0)), [1, 1, 1, 1]);
+    assert_eq!(map.get(UVec2::new(3, 0)), [1, 2, 1, 2]);
+    assert_eq!(map.get(UVec2::new(4, 0)), [2, 2, 2, 2]);
+    assert_eq!(map.get(UVec2::new(5, 0)), [2, 3, 2, 3]);
+    assert_eq!(map.get(UVec2::new(0, 1)), [0, 0, 6, 6]);
+    assert_eq!(map.get(UVec2::new(0, 2)), [6, 6, 6, 6]);
+    assert_eq!(map.get(UVec2::new(0, 3)), [6, 6, 12, 12]);
+    assert_eq!(map.get(UVec2::new(0, 4)), [12, 12, 12, 12]);
+    assert_eq!(map.get(UVec2::new(0, 5)), [12, 12, 18, 18]);
+    assert_eq!(map.get(UVec2::new(5, 5)), [14, 15, 20, 21]);
 }
 
 #[test]
 pub fn test_terrain_grid() {
-    let options = TerrainOptions::new(default(), UVec2::new(8, 8));
-    let terrain: Terrain = options.into();
-    let noise: Grid<f64> = terrain.noise.into();
+    let options = TerrainOptions::new(default(), UVec2::new(4, 4));
+    let flat: SquareGrid<()> = SquareGrid::new_flat(options.size);
+    let mapping = RectangularMapping::new(options.noise());
+    let deformed = flat.map(|p, _| {
+        let value = mapping.get(p);
+        HeightOnlyCell::new(value)
+    });
 
-    println!("{:#?}", noise.around(IVec2::new(0, 0)));
-    println!("{:#?}", noise.around(IVec2::new(1, 0)));
-    println!("{:#?}", noise.around(IVec2::new(2, 3)));
-
-    let noise = noise.expand();
-
-    println!("{:#?}", noise.around(IVec2::new(0, 0)));
-    println!("{:#?}", noise.around(IVec2::new(1, 0)));
-    println!("{:#?}", noise.around(IVec2::new(2, 3)));
+    println!("{:#?}", deformed);
 }

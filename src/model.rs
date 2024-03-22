@@ -10,6 +10,11 @@ use bevy::{
     math::{IVec2, Vec2},
 };
 
+mod grid;
+
+#[allow(unused_imports)]
+pub use grid::*;
+
 pub const STRUCTURE_HEIGHT: f32 = 0.6;
 pub const GROUND_DEPTH: f32 = 0.2;
 pub const WALL_HEIGHT: f32 = 0.6;
@@ -51,6 +56,10 @@ impl From<u32> for Seed<u32> {
 pub struct WorldGeometry<T> {
     size: Vec2Usize,
     map: Vec<T>,
+}
+
+pub trait AroundCenter<Item> {
+    fn around(&self, center: IVec2) -> Around<Option<Item>>;
 }
 
 #[derive(Debug)]
@@ -206,11 +215,6 @@ impl ActivePlayer {
         &self.0
     }
 }
-
-#[derive(Resource, Default)]
-pub struct ActivePhase(Phase);
-
-impl ActivePhase {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, States)]
 pub enum Phase {
