@@ -21,6 +21,11 @@ impl<T> SquareGrid<T> {
         self.cells
     }
 
+    pub fn set(&mut self, p: IVec2, value: T) {
+        let index = self.coordinates_to_index(p).expect("set coordinates");
+        self.cells[index] = value;
+    }
+
     pub fn apply<V>(&self, mut map_fn: impl FnMut(UVec2, &T) -> V) -> SquareGrid<V> {
         let cells = self
             .cells
@@ -49,11 +54,6 @@ impl<T> SquareGrid<T> {
             .collect();
 
         SquareGrid::new(self.size, cells)
-    }
-
-    pub fn set(&mut self, p: IVec2, value: T) {
-        let index = self.coordinates_to_index(p).expect("set coordinates");
-        self.cells[index] = value;
     }
 
     pub fn outline(&mut self, p0: IVec2, p1: IVec2, value: T)

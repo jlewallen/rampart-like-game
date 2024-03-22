@@ -18,6 +18,8 @@ impl HeightOnlyCell {
     }
 }
 
+const HEIGHT_SCALE: f32 = 1.0;
+
 impl Meshable for HeightOnlyCell {
     type Output = Mesh;
 
@@ -25,10 +27,10 @@ impl Meshable for HeightOnlyCell {
         let half_size = Vec2::splat(TILE_SIZE) / 2.0;
         let rotation = Quat::from_rotation_arc(Vec3::Y, Vec3::Y);
         let positions = vec![
-            rotation * Vec3::new(-half_size.x, self.0[0] as f32, -half_size.y),
-            rotation * Vec3::new(-half_size.x, self.0[2] as f32, half_size.y),
-            rotation * Vec3::new(half_size.x, self.0[3] as f32, half_size.y),
-            rotation * Vec3::new(half_size.x, self.0[1] as f32, -half_size.y),
+            rotation * Vec3::new(-half_size.x, self.0[0] as f32 * HEIGHT_SCALE, -half_size.y),
+            rotation * Vec3::new(-half_size.x, self.0[2] as f32 * HEIGHT_SCALE, half_size.y),
+            rotation * Vec3::new(half_size.x, self.0[3] as f32 * HEIGHT_SCALE, half_size.y),
+            rotation * Vec3::new(half_size.x, self.0[1] as f32 * HEIGHT_SCALE, -half_size.y),
         ];
 
         let normals = vec![Vec3::Y.to_array(); 4];

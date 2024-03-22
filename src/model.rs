@@ -12,7 +12,6 @@ use bevy::{
 
 mod grid;
 
-#[allow(unused_imports)]
 pub use grid::*;
 
 pub const STRUCTURE_HEIGHT: f32 = 0.6;
@@ -28,8 +27,6 @@ pub const BRICK_COLOR: &str = "E7444A";
 pub const MAXIMUM_HORIZONTAL_DISTANCE: f32 = 35.0;
 pub const MINIMUM_FLIGHT_TIME: f32 = 1.0;
 pub const GRAVITY: f32 = 9.8;
-
-pub type Vec2Usize = (usize, usize);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Seed<T>(T);
@@ -212,9 +209,9 @@ impl StructureLayers {
         }
     }
 
-    pub fn create_castle(&mut self, center: Vec2Usize, size: Vec2Usize, player: Player) {
-        let (x0, y0) = (center.0 - size.0 / 2, center.1 - size.1 / 2);
-        let (x1, y1) = (center.0 + size.0 / 2, center.1 + size.1 / 2);
+    pub fn create_castle(&mut self, center: IVec2, size: IVec2, player: Player) {
+        let (x0, y0) = (center.x - size.x / 2, center.y - size.y / 2);
+        let (x1, y1) = (center.x + size.x / 2, center.y + size.y / 2);
 
         self.structure_layer.outline(
             IVec2::new(x0 as i32, y0 as i32),
@@ -226,7 +223,7 @@ impl StructureLayers {
         );
 
         self.structure_layer.set(
-            IVec2::new(center.0 as i32, center.1 as i32),
+            IVec2::new(center.x as i32, center.y as i32),
             Some(Structure::Cannon(Cannon {
                 player,
                 entity: None,
@@ -238,8 +235,8 @@ impl StructureLayers {
 impl FromWorld for StructureLayers {
     fn from_world(_world: &mut World) -> Self {
         let mut structure_layers = StructureLayers::new(UVec2::new(64, 64));
-        structure_layers.create_castle((4, 4), (4, 4), Player::One);
-        structure_layers.create_castle((26, 26), (4, 4), Player::Two);
+        structure_layers.create_castle(IVec2::new(4, 4), IVec2::new(4, 4), Player::One);
+        structure_layers.create_castle(IVec2::new(26, 26), IVec2::new(4, 4), Player::Two);
         structure_layers
     }
 }
