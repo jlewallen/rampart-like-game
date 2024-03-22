@@ -19,6 +19,8 @@ use std::time::Duration;
 
 // use crate::AroundCenter;
 
+use crate::TILE_SIZE;
+
 // use super::model::Grid;
 use super::model::Seed;
 
@@ -78,7 +80,7 @@ pub struct Terrain {
 
 impl Terrain {
     pub fn world_to_grid(&self, position: Vec3) -> Option<UVec2> {
-        let local = position + self.grid.world_to_local();
+        let local = position + self.grid.world_to_local() + (TILE_SIZE / 2.0);
         let local = local.xz();
 
         info!(
@@ -366,7 +368,7 @@ impl Meshable for HeightOnlyCell {
     type Output = Mesh;
 
     fn mesh(&self) -> Self::Output {
-        let half_size = Vec2::ONE / 2.0;
+        let half_size = Vec2::splat(TILE_SIZE) / 2.0;
         let rotation = Quat::from_rotation_arc(Vec3::Y, Vec3::Y);
         let positions = vec![
             rotation * Vec3::new(-half_size.x, self.0[0] as f32, -half_size.y),
