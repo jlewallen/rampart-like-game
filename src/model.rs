@@ -97,12 +97,6 @@ impl Around<IVec2> {
     }
 }
 
-impl<T> XyIndex<T> for Grid<T> {
-    fn get_xy(&self, p: IVec2) -> Option<&T> {
-        self.get(p)
-    }
-}
-
 impl<T, V> AroundCenter<V> for T
 where
     T: XyIndex<V>,
