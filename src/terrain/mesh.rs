@@ -7,116 +7,7 @@ use bevy::{
 };
 use noise::utils::NoiseMap;
 
-use crate::{XyIndex, TILE_SIZE};
-
-fn get_color(val: f32) -> Color {
-    let color = match val.abs() {
-        v if v < 0.1 => Color::hex("#0a7e0a"),
-        v if v < 0.2 => Color::hex("#0da50d"),
-        v if v < 0.3 => Color::hex("#10cb10"),
-        v if v < 0.4 => Color::hex("#18ed18"),
-        v if v < 0.5 => Color::hex("#3ff03f"),
-        v if v < 0.6 => Color::hex("#65f365"),
-        v if v < 0.7 => Color::hex("#8cf68c"),
-        v if v < 0.8 => Color::hex("#b2f9b2"),
-        v if v < 0.9 => Color::hex("#d9fcd9"),
-        v if v <= 1.0 => Color::hex("#ffffff"),
-        _ => panic!("unexpected value"),
-    };
-    color.expect("bad color")
-}
-
-pub struct SquareGrid<T> {
-    size: UVec2,
-    cells: Vec<T>,
-}
-
-impl<T> SquareGrid<T> {
-    pub fn new(size: UVec2, cells: Vec<T>) -> Self {
-        assert!((size.x * size.y) as usize == cells.len());
-        Self { size, cells }
-    }
-
-    pub fn local_to_world(&self) -> Vec3 {
-        -self.world_to_local()
-    }
-
-    pub fn world_to_local(&self) -> Vec3 {
-        let size = self.size.as_vec2();
-        (Vec3::new(size.x, 0., size.y) / 2.0) - (Vec3::ONE / 2.0)
-    }
-
-    pub fn into_cells(self) -> Vec<T> {
-        self.cells
-    }
-
-    pub fn apply<V>(&self, mut map_fn: impl FnMut(UVec2, &T) -> V) -> SquareGrid<V> {
-        let cells = self
-            .cells
-            .iter()
-            .enumerate()
-            .map(|(index, value)| {
-                let x = index as u32 % self.size.x;
-                let y = index as u32 / self.size.x;
-                map_fn(UVec2::new(x, y), value)
-            })
-            .collect();
-
-        SquareGrid::new(self.size, cells)
-    }
-
-    pub fn map<V>(self, mut map_fn: impl FnMut(UVec2, T) -> V) -> SquareGrid<V> {
-        let cells = self
-            .cells
-            .into_iter()
-            .enumerate()
-            .map(|(index, value)| {
-                let x = index as u32 % self.size.x;
-                let y = index as u32 / self.size.x;
-                map_fn(UVec2::new(x, y), value)
-            })
-            .collect();
-
-        SquareGrid::new(self.size, cells)
-    }
-}
-
-impl<T> SquareGrid<T>
-where
-    T: Default + Clone,
-{
-    pub fn new_flat(size: UVec2) -> Self {
-        Self::new(size, vec![T::default(); (size.x * size.y) as usize])
-    }
-}
-
-impl<T> XyIndex<T> for SquareGrid<T> {
-    fn get_xy(&self, p: IVec2) -> Option<&T> {
-        if p.x < 0 || p.y < 0 || p.x + 1 >= self.size.x as i32 || p.y + 1 >= self.size.y as i32 {
-            None
-        } else {
-            Some(&self.cells[p.y as usize * self.size.x as usize + p.x as usize])
-        }
-    }
-}
-
-impl<T: Clone> Clone for SquareGrid<T> {
-    fn clone(&self) -> Self {
-        Self {
-            size: self.size.clone(),
-            cells: self.cells.clone(),
-        }
-    }
-}
-
-impl<T: std::fmt::Debug> std::fmt::Debug for SquareGrid<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SquareGrid")
-            .field("size", &self.size)
-            .field("cells", &self.cells)
-            .finish()
-    }
-}
+use crate::{SquareGrid, TILE_SIZE};
 
 #[derive(Debug, Clone)]
 pub struct HeightOnlyCell([f64; 4]);
@@ -273,83 +164,105 @@ impl RectangularMapping<NoiseMap> {
     }
 }
 
-#[test]
-fn test_rectangular_mapping_map_coordinates() {
-    // [ 0,  1,  2,  3,  4,  5]
-    // [ 6,  7,  8,  9, 10, 11]
-    // [12, 13, 14, 15, 16, 17]
-    // [18, 19, 20, 21, 22, 23]
-    // [24, 25, 26, 27, 28, 29]
-    // [30, 31, 32, 33, 34, 35]
-    let data = (0..6)
-        .into_iter()
-        .map(|row| ((row * 6)..((row + 1) * 6)).into_iter().collect::<Vec<_>>())
-        .collect::<Vec<_>>();
-
-    let map = RectangularMapping::new(data);
-    assert_eq!(
-        map.map_coordinates(UVec2::new(0, 0)),
-        (
-            UVec2::new(0, 0),
-            UVec2::new(0, 0),
-            UVec2::new(0, 0),
-            UVec2::new(0, 0)
-        )
-    );
-    assert_eq!(
-        map.map_coordinates(UVec2::new(1, 1)),
-        (
-            UVec2::new(0, 0),
-            UVec2::new(1, 0),
-            UVec2::new(0, 1),
-            UVec2::new(1, 1)
-        )
-    );
-    assert_eq!(
-        map.map_coordinates(UVec2::new(0, 2)),
-        (
-            UVec2::new(0, 1),
-            UVec2::new(0, 1),
-            UVec2::new(0, 1),
-            UVec2::new(0, 1)
-        )
-    );
-    assert_eq!(
-        map.map_coordinates(UVec2::new(5, 5)),
-        (
-            UVec2::new(2, 2),
-            UVec2::new(3, 2),
-            UVec2::new(2, 3),
-            UVec2::new(3, 3)
-        )
-    );
+fn get_color(val: f32) -> Color {
+    let color = match val.abs() {
+        v if v < 0.1 => Color::hex("#0a7e0a"),
+        v if v < 0.2 => Color::hex("#0da50d"),
+        v if v < 0.3 => Color::hex("#10cb10"),
+        v if v < 0.4 => Color::hex("#18ed18"),
+        v if v < 0.5 => Color::hex("#3ff03f"),
+        v if v < 0.6 => Color::hex("#65f365"),
+        v if v < 0.7 => Color::hex("#8cf68c"),
+        v if v < 0.8 => Color::hex("#b2f9b2"),
+        v if v < 0.9 => Color::hex("#d9fcd9"),
+        v if v <= 1.0 => Color::hex("#ffffff"),
+        _ => panic!("unexpected value"),
+    };
+    color.expect("bad color")
 }
 
-#[test]
-fn test_rectangular_mapping_map_vec_vec() {
-    // [ 0,  1,  2,  3,  4,  5]
-    // [ 6,  7,  8,  9, 10, 11]
-    // [12, 13, 14, 15, 16, 17]
-    // [18, 19, 20, 21, 22, 23]
-    // [24, 25, 26, 27, 28, 29]
-    // [30, 31, 32, 33, 34, 35]
-    let data = (0..6)
-        .into_iter()
-        .map(|row| ((row * 6)..((row + 1) * 6)).into_iter().collect::<Vec<_>>())
-        .collect::<Vec<_>>();
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let map = RectangularMapping::new(data);
-    assert_eq!(map.get(UVec2::new(0, 0)), [0, 0, 0, 0]);
-    assert_eq!(map.get(UVec2::new(1, 1)), [0, 1, 6, 7]);
-    assert_eq!(map.get(UVec2::new(1, 0)), [0, 1, 0, 1]);
-    assert_eq!(map.get(UVec2::new(2, 0)), [1, 1, 1, 1]);
-    assert_eq!(map.get(UVec2::new(3, 0)), [1, 2, 1, 2]);
-    assert_eq!(map.get(UVec2::new(4, 0)), [2, 2, 2, 2]);
-    assert_eq!(map.get(UVec2::new(5, 0)), [2, 3, 2, 3]);
-    assert_eq!(map.get(UVec2::new(0, 1)), [0, 0, 6, 6]);
-    assert_eq!(map.get(UVec2::new(0, 2)), [6, 6, 6, 6]);
-    assert_eq!(map.get(UVec2::new(0, 3)), [6, 6, 12, 12]);
-    assert_eq!(map.get(UVec2::new(0, 4)), [12, 12, 12, 12]);
-    assert_eq!(map.get(UVec2::new(0, 5)), [12, 12, 18, 18]);
-    assert_eq!(map.get(UVec2::new(5, 5)), [14, 15, 20, 21]);
+    #[test]
+    fn test_rectangular_mapping_map_coordinates() {
+        // [ 0,  1,  2,  3,  4,  5]
+        // [ 6,  7,  8,  9, 10, 11]
+        // [12, 13, 14, 15, 16, 17]
+        // [18, 19, 20, 21, 22, 23]
+        // [24, 25, 26, 27, 28, 29]
+        // [30, 31, 32, 33, 34, 35]
+        let data = (0..6)
+            .into_iter()
+            .map(|row| ((row * 6)..((row + 1) * 6)).into_iter().collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+
+        let map = RectangularMapping::new(data);
+        assert_eq!(
+            map.map_coordinates(UVec2::new(0, 0)),
+            (
+                UVec2::new(0, 0),
+                UVec2::new(0, 0),
+                UVec2::new(0, 0),
+                UVec2::new(0, 0)
+            )
+        );
+        assert_eq!(
+            map.map_coordinates(UVec2::new(1, 1)),
+            (
+                UVec2::new(0, 0),
+                UVec2::new(1, 0),
+                UVec2::new(0, 1),
+                UVec2::new(1, 1)
+            )
+        );
+        assert_eq!(
+            map.map_coordinates(UVec2::new(0, 2)),
+            (
+                UVec2::new(0, 1),
+                UVec2::new(0, 1),
+                UVec2::new(0, 1),
+                UVec2::new(0, 1)
+            )
+        );
+        assert_eq!(
+            map.map_coordinates(UVec2::new(5, 5)),
+            (
+                UVec2::new(2, 2),
+                UVec2::new(3, 2),
+                UVec2::new(2, 3),
+                UVec2::new(3, 3)
+            )
+        );
+    }
+
+    #[test]
+    fn test_rectangular_mapping_map_vec_vec() {
+        // [ 0,  1,  2,  3,  4,  5]
+        // [ 6,  7,  8,  9, 10, 11]
+        // [12, 13, 14, 15, 16, 17]
+        // [18, 19, 20, 21, 22, 23]
+        // [24, 25, 26, 27, 28, 29]
+        // [30, 31, 32, 33, 34, 35]
+        let data = (0..6)
+            .into_iter()
+            .map(|row| ((row * 6)..((row + 1) * 6)).into_iter().collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+
+        let map = RectangularMapping::new(data);
+        assert_eq!(map.get(UVec2::new(0, 0)), [0, 0, 0, 0]);
+        assert_eq!(map.get(UVec2::new(1, 1)), [0, 1, 6, 7]);
+        assert_eq!(map.get(UVec2::new(1, 0)), [0, 1, 0, 1]);
+        assert_eq!(map.get(UVec2::new(2, 0)), [1, 1, 1, 1]);
+        assert_eq!(map.get(UVec2::new(3, 0)), [1, 2, 1, 2]);
+        assert_eq!(map.get(UVec2::new(4, 0)), [2, 2, 2, 2]);
+        assert_eq!(map.get(UVec2::new(5, 0)), [2, 3, 2, 3]);
+        assert_eq!(map.get(UVec2::new(0, 1)), [0, 0, 6, 6]);
+        assert_eq!(map.get(UVec2::new(0, 2)), [6, 6, 6, 6]);
+        assert_eq!(map.get(UVec2::new(0, 3)), [6, 6, 12, 12]);
+        assert_eq!(map.get(UVec2::new(0, 4)), [12, 12, 12, 12]);
+        assert_eq!(map.get(UVec2::new(0, 5)), [12, 12, 18, 18]);
+        assert_eq!(map.get(UVec2::new(5, 5)), [14, 15, 20, 21]);
+    }
 }

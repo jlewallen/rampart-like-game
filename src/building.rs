@@ -8,7 +8,7 @@ use crate::{
     pick_coordinates,
     resources::{self, Structures},
     ActivePlayer, Cannon, ConnectingWall, ConstructionEvent, Coordinates, Phase, Structure,
-    StructureLayers, Terrain, Vec2Usize, Wall, GROUND_DEPTH, WALL_HEIGHT,
+    StructureLayers, Terrain, Wall, GROUND_DEPTH, WALL_HEIGHT,
 };
 
 pub struct BuildingPlugin;
@@ -87,17 +87,16 @@ fn place_cannon(
 
 fn create_structure(
     commands: &mut Commands,
-    terrain: &StructureLayers,
-    grid: Vec2Usize,
+    _terrain: &StructureLayers,
+    grid: IVec2,
     position: &Vec2,
     item: &Structure,
     structures: &Res<Structures>,
 ) {
     match item {
         Structure::Wall(wall) => {
-            let around = &terrain.structure_layer.around(grid);
-
-            let connecting: ConnectingWall = around.into();
+            // let around = &terrain.structure_layer.around(grid);
+            let connecting: ConnectingWall = ConnectingWall::Unknown; // around.into();
 
             // info!("create-structure {:?} {:?}", grid, connecting);
 
@@ -222,10 +221,10 @@ fn refresh_terrain(
 
         let grid = ev.coordinates().clone().into();
         let structure = ev.structure().clone();
-        let position = structure_layers.structure_layer.grid_position(grid);
+        let position = structure_layers.structure_layer.grid_to_world(grid);
         let existing = structure_layers
             .structure_layer
-            .get(grid)
+            .get_xy(grid)
             .expect("Out of bounds");
         if existing.is_some() {
             return;
@@ -288,12 +287,10 @@ fn placing(
         return;
     }
 
-    let Some(terrain) = terrain.get_single().ok() else {
+    let Some(_terrain) = terrain.get_single().ok() else {
         warn!("no terrain");
         return;
     };
-
-    trace!("{:?}", terrain);
 
     for event in events.read() {
         if let Some(position) = event.event.hit.position {

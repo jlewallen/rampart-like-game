@@ -7,7 +7,7 @@ use bevy::{
         system::Resource,
         world::{FromWorld, World},
     },
-    math::{IVec2, Vec2},
+    math::{IVec2, UVec2},
 };
 
 mod grid;
@@ -52,146 +52,16 @@ impl From<u32> for Seed<u32> {
     }
 }
 
-#[derive(Debug)]
-pub struct WorldGeometry<T> {
-    size: Vec2Usize,
-    map: Vec<T>,
-}
-
-pub trait AroundCenter<T> {
-    fn around(&self, center: IVec2) -> Around<Option<T>>;
-}
-
-#[derive(Debug)]
-pub struct Around<T>((T, T, T), (T, T, T), (T, T, T));
-
-impl<T> Around<T> {
-    pub fn map<R>(&self, map_fn: impl Fn(&T) -> R) -> Around<R> {
-        Around(
-            (map_fn(&self.0 .0), map_fn(&self.0 .1), map_fn(&self.0 .2)),
-            (map_fn(&self.1 .0), map_fn(&self.1 .1), map_fn(&self.1 .2)),
-            (map_fn(&self.2 .0), map_fn(&self.2 .1), map_fn(&self.2 .2)),
-        )
-    }
-}
-
-impl Around<IVec2> {
-    pub fn center(c: IVec2) -> Self {
-        Self(
-            (
-                IVec2::new(c.x - 1, c.y - 1),
-                IVec2::new(c.x, c.y - 1),
-                IVec2::new(c.x + 1, c.y - 1),
-            ),
-            (
-                IVec2::new(c.x - 1, c.y),
-                IVec2::new(c.x, c.y),
-                IVec2::new(c.x + 1, c.y),
-            ),
-            (
-                IVec2::new(c.x - 1, c.y + 1),
-                IVec2::new(c.x, c.y + 1),
-                IVec2::new(c.x + 1, c.y + 1),
-            ),
-        )
-    }
-}
-
-impl<T, V> AroundCenter<V> for T
-where
-    T: XyIndex<V>,
-    V: Clone,
-{
-    fn around(&self, center: IVec2) -> Around<Option<V>> {
-        Around::center(center).map(|xy| self.get_xy(*xy).cloned())
-    }
-}
-
-impl<T> WorldGeometry<T>
-where
-    T: Default + Clone,
-{
-    pub fn new(size: Vec2Usize) -> Self {
-        Self {
-            size,
-            map: vec![T::default(); size.0 * size.1],
-        }
-    }
-
-    pub fn set(&mut self, c: Vec2Usize, value: T) {
-        let index = self.coordinates_to_index(c);
-        self.map[index] = value;
-    }
-
-    pub fn get(&self, c: Vec2Usize) -> Option<&T> {
-        let index = self.coordinates_to_index(c);
-        if index < self.map.len() {
-            Some(&self.map[index])
-        } else {
-            None
-        }
-    }
-
-    pub fn outline(&mut self, (x0, y0): Vec2Usize, (x1, y1): Vec2Usize, value: T) {
-        for x in x0..(x1 + 1) {
-            self.set((x, y0), value.clone());
-            self.set((x, y1), value.clone());
-        }
-        for y in (y0 + 1)..y1 {
-            self.set((x0, y), value.clone());
-            self.set((x1, y), value.clone());
-        }
-    }
-
-    pub fn layout(&self) -> Vec<(Vec2Usize, Vec2, &T)> {
-        self.map
-            .iter()
-            .enumerate()
-            .map(|(index, value)| {
-                (
-                    self.index_to_grid(index),
-                    self.index_to_coordindates(index),
-                    value,
-                )
-            })
-            .collect()
-    }
-
-    pub fn around(&self, c: Vec2Usize) -> Around<Option<&T>> {
-        Around::center(IVec2::new(c.0 as i32, c.1 as i32))
-            .map(|c| self.get((c.x as usize, c.y as usize)))
-    }
-
-    pub fn grid_position(&self, grid: Vec2Usize) -> Vec2 {
-        self.index_to_coordindates(self.coordinates_to_index(grid))
-    }
-
-    fn index_to_grid(&self, index: usize) -> Vec2Usize {
-        (index % self.size.0, index / self.size.1)
-    }
-
-    fn index_to_coordindates(&self, index: usize) -> Vec2 {
-        let c = self.index_to_grid(index);
-        let x: f32 = (c.0 as f32 - (self.size.0 / 2) as f32) * TILE_SIZE + (TILE_SIZE / 2.);
-        let y: f32 = (c.1 as f32 - (self.size.1 / 2) as f32) * TILE_SIZE + (TILE_SIZE / 2.);
-        Vec2::new(x, y)
-    }
-
-    fn coordinates_to_index(&self, c: Vec2Usize) -> usize {
-        c.1 * self.size.1 + (c.0)
-    }
-}
-
 #[derive(Component, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Coordinates(Vec2Usize);
+pub struct Coordinates(IVec2);
 
 impl Coordinates {
-    pub fn new(vec: Vec2Usize) -> Self {
+    pub fn new(vec: IVec2) -> Self {
         Self(vec)
     }
 }
 
-impl From<Coordinates> for Vec2Usize {
+impl From<Coordinates> for IVec2 {
     fn from(value: Coordinates) -> Self {
         value.0
     }
@@ -287,17 +157,6 @@ impl ConstructionEvent {
 impl Event for ConstructionEvent {}
 
 #[derive(Component, Clone, Debug)]
-pub enum Ground {
-    Dirt,
-}
-
-impl Default for Ground {
-    fn default() -> Self {
-        Self::Dirt
-    }
-}
-
-#[derive(Component, Clone, Debug)]
 pub struct Wall {
     pub player: Player,
     pub entity: Option<Entity>,
@@ -316,6 +175,7 @@ pub enum Structure {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum ConnectingWall {
     // Isolated,
     NorthSouth,
@@ -324,6 +184,7 @@ pub enum ConnectingWall {
     Unknown,
 }
 
+/*
 impl<T> From<&Around<Option<&Option<T>>>> for ConnectingWall {
     fn from(value: &Around<Option<&Option<T>>>) -> Self {
         match value {
@@ -337,16 +198,17 @@ impl<T> From<&Around<Option<&Option<T>>>> for ConnectingWall {
         }
     }
 }
+*/
 
 #[derive(Resource)]
 pub struct StructureLayers {
-    pub(crate) structure_layer: WorldGeometry<Option<Structure>>,
+    pub(crate) structure_layer: SquareGrid<Option<Structure>>,
 }
 
 impl StructureLayers {
-    pub fn new(size: Vec2Usize) -> Self {
+    pub fn new(size: UVec2) -> Self {
         Self {
-            structure_layer: WorldGeometry::new(size),
+            structure_layer: SquareGrid::new_flat(size),
         }
     }
 
@@ -355,8 +217,8 @@ impl StructureLayers {
         let (x1, y1) = (center.0 + size.0 / 2, center.1 + size.1 / 2);
 
         self.structure_layer.outline(
-            (x0, y0),
-            (x1, y1),
+            IVec2::new(x0 as i32, y0 as i32),
+            IVec2::new(x1 as i32, y1 as i32),
             Some(Structure::Wall(Wall {
                 player: player.clone(),
                 entity: None,
@@ -364,7 +226,7 @@ impl StructureLayers {
         );
 
         self.structure_layer.set(
-            center,
+            IVec2::new(center.0 as i32, center.1 as i32),
             Some(Structure::Cannon(Cannon {
                 player,
                 entity: None,
@@ -375,7 +237,7 @@ impl StructureLayers {
 
 impl FromWorld for StructureLayers {
     fn from_world(_world: &mut World) -> Self {
-        let mut structure_layers = StructureLayers::new((32, 32));
+        let mut structure_layers = StructureLayers::new(UVec2::new(64, 64));
         structure_layers.create_castle((4, 4), (4, 4), Player::One);
         structure_layers.create_castle((26, 26), (4, 4), Player::Two);
         structure_layers

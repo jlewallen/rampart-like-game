@@ -12,11 +12,11 @@ use std::time::Duration;
 
 mod mesh;
 
-use self::mesh::{HeightOnlyCell, RectangularMapping, SquareGrid};
+use self::mesh::{HeightOnlyCell, RectangularMapping};
 
 use super::model::Seed;
 use super::model::TILE_SIZE;
-use crate::AroundCenter;
+use crate::{AroundCenter, SquareGrid};
 
 #[derive(Clone, Default, Debug)]
 struct TerrainSeed {
@@ -116,14 +116,6 @@ pub enum Survey {
     Ground,
     Beach,
     Water,
-}
-
-impl std::fmt::Debug for Terrain {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Terrain")
-            .field("options", &self.options)
-            .finish()
-    }
 }
 
 impl From<TerrainOptions> for Terrain {
