@@ -78,8 +78,15 @@ pub struct Terrain {
 
 impl Terrain {
     pub fn world_to_grid(&self, position: Vec3) -> Option<UVec2> {
-        let local = position + self.world_to_local();
+        let local = position + self.grid.world_to_local();
         let local = local.xz();
+
+        info!(
+            "world-to-local={:?} position={:?} local={:?}",
+            self.grid.world_to_local(),
+            position,
+            local
+        );
 
         if local.x > self.options.size.x as f32
             || local.y > self.options.size.y as f32
@@ -95,9 +102,7 @@ impl Terrain {
     pub fn survey(&self, position: Vec3) -> Option<Survey> {
         match self.world_to_grid(position) {
             Some(index) => {
-                // let around = grid.around(index.as_ivec2());
-                // info!("{:#?}", index.as_ivec2());
-                // info!("{:?}", around);
+                info!("{:#?}", index.as_ivec2());
 
                 None
             }
@@ -107,15 +112,6 @@ impl Terrain {
 
     fn size(&self) -> UVec2 {
         self.options.size
-    }
-
-    fn local_to_world(&self) -> Vec3 {
-        -self.world_to_local()
-    }
-
-    fn world_to_local(&self) -> Vec3 {
-        let size = self.options.size.as_vec2();
-        Vec3::new(size.x, 0., size.y) / 2.0
     }
 }
 
@@ -275,36 +271,28 @@ fn get_color(val: f32) -> Color {
     color.expect("bad color")
 }
 
-#[allow(dead_code)]
 pub struct SquareGrid<T> {
     size: UVec2,
     cells: Vec<T>,
 }
 
-#[allow(dead_code)]
 impl<T> SquareGrid<T> {
     pub fn new(size: UVec2, cells: Vec<T>) -> Self {
         assert!((size.x * size.y) as usize == cells.len());
         Self { size, cells }
     }
 
-    pub fn into_cells(self) -> Vec<T> {
-        self.cells
+    fn local_to_world(&self) -> Vec3 {
+        -self.world_to_local()
     }
 
-    pub fn apply_mut<V>(&mut self, mut map_fn: impl FnMut(UVec2, &mut T) -> V) -> SquareGrid<V> {
-        let cells = self
-            .cells
-            .iter_mut()
-            .enumerate()
-            .map(|(index, value)| {
-                let x = index as u32 % self.size.x;
-                let y = index as u32 / self.size.x;
-                map_fn(UVec2::new(x, y), value)
-            })
-            .collect();
+    fn world_to_local(&self) -> Vec3 {
+        let size = self.size.as_vec2();
+        (Vec3::new(size.x, 0., size.y) / 2.0) - (Vec3::ONE / 2.0)
+    }
 
-        SquareGrid::new(self.size, cells)
+    pub fn into_cells(self) -> Vec<T> {
+        self.cells
     }
 
     pub fn apply<V>(&self, mut map_fn: impl FnMut(UVec2, &T) -> V) -> SquareGrid<V> {
@@ -338,7 +326,6 @@ impl<T> SquareGrid<T> {
     }
 }
 
-#[allow(dead_code)]
 impl<T> SquareGrid<T>
 where
     T: Default + Clone,
@@ -401,7 +388,12 @@ impl Meshable for HeightOnlyCell {
         .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
         .with_inserted_attribute(
             Mesh::ATTRIBUTE_COLOR,
-            vec![Vec4::ONE, Vec4::ONE, Vec4::ONE, Vec4::ONE],
+            vec![
+                get_color(self.0[0] as f32).as_rgba_f32(),
+                get_color(self.0[2] as f32).as_rgba_f32(),
+                get_color(self.0[3] as f32).as_rgba_f32(),
+                get_color(self.0[1] as f32).as_rgba_f32(),
+            ],
         )
         .with_inserted_indices(indices)
     }
@@ -414,8 +406,7 @@ where
     type Output = Mesh;
 
     fn mesh(&self) -> Self::Output {
-        let size = self.size.as_vec2();
-        let all = (Vec3::new(size.x, 0.0, size.y) / -2.0) + Vec3::new(0., 0.1, 0.);
+        let all = self.local_to_world();
 
         let meshes = self
             .apply(|p, cell| {
