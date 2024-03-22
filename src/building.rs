@@ -318,12 +318,8 @@ fn try_place(
         return;
     };
 
-    info!("{:?}", terrain);
-
     for event in events.read() {
         if let Some(position) = event.event.hit.position {
-            info!("{:?}", position);
-
             if let Some(survey) = terrain.survey(position) {
                 info!("{:#?}", survey);
             }

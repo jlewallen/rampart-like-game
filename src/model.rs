@@ -58,8 +58,8 @@ pub struct WorldGeometry<T> {
     map: Vec<T>,
 }
 
-pub trait AroundCenter<Item> {
-    fn around(&self, center: IVec2) -> Around<Option<Item>>;
+pub trait AroundCenter<T> {
+    fn around(&self, center: IVec2) -> Around<Option<T>>;
 }
 
 #[derive(Debug)]
@@ -94,6 +94,22 @@ impl Around<IVec2> {
                 IVec2::new(c.x + 1, c.y + 1),
             ),
         )
+    }
+}
+
+impl<T> XyIndex<T> for Grid<T> {
+    fn get_xy(&self, p: IVec2) -> Option<&T> {
+        self.get(p)
+    }
+}
+
+impl<T, V> AroundCenter<V> for T
+where
+    T: XyIndex<V>,
+    V: Clone,
+{
+    fn around(&self, center: IVec2) -> Around<Option<V>> {
+        Around::center(center).map(|xy| self.get_xy(*xy).cloned())
     }
 }
 

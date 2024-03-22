@@ -1,8 +1,6 @@
 use bevy::math::*;
 use noise::utils::NoiseMap;
 
-use crate::{Around, AroundCenter};
-
 pub struct Grid<T> {
     size: (usize, usize),
     items: Vec<T>,
@@ -253,12 +251,6 @@ impl From<NoiseMap> for Grid<f64> {
     }
 }
 
-impl<T: Clone> AroundCenter<T> for Grid<T> {
-    fn around(&self, center: IVec2) -> Around<Option<T>> {
-        Around::center(center).map(|xy| self.get(*xy).cloned())
-    }
-}
-
 #[test]
 pub fn test_grid_2x2_expand() {
     let grid = Grid::new((2, 2), vec![1, 2, 3, 4]);
@@ -369,4 +361,8 @@ pub fn test_grid_32x32_expand() {
     let grid = Grid::new((32, 32), (1..32 * 32 + 1).into_iter().collect()).expand();
 
     assert_eq!(grid.size(), (63, 63));
+}
+
+pub trait XyIndex<T> {
+    fn get_xy(&self, p: IVec2) -> Option<&T>;
 }
