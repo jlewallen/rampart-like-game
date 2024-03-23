@@ -13,12 +13,12 @@ use std::time::Duration;
 mod mesh;
 #[cfg(test)]
 mod tests;
+mod textures;
 
-use crate::{helpers::GamePlayLifetime, model::Settings};
+use super::helpers::GamePlayLifetime;
+use super::model::{AppState, AroundCenter, Seed, Settings, SquareGrid, TILE_SIZE};
 
-use self::mesh::{HeightOnlyCell, RectangularMapping};
-
-use super::model::{AppState, AroundCenter, Seed, SquareGrid, TILE_SIZE};
+use mesh::{HeightOnlyCell, RectangularMapping};
 
 #[derive(Clone, Default, Debug)]
 struct TerrainSeed {
@@ -36,7 +36,7 @@ impl TerrainSeed {
 }
 
 #[derive(Debug, Clone)]
-pub struct TerrainOptions {
+struct TerrainOptions {
     seed: TerrainSeed,
     size: UVec2,
 }
@@ -44,11 +44,6 @@ pub struct TerrainOptions {
 impl TerrainOptions {
     fn new(seed: TerrainSeed, size: UVec2) -> Self {
         Self { seed, size }
-    }
-
-    #[allow(dead_code)]
-    pub fn size(&self) -> UVec2 {
-        self.size
     }
 
     fn noise(&self) -> NoiseMap {
@@ -61,6 +56,7 @@ impl TerrainOptions {
             .add_control_point(1.0)
             .invert_terraces(true);
 
+        // Yes, this generates more noise than we'll use.
         PlaneMapBuilder::new(terraced)
             .set_size(self.size.x as usize, self.size.y as usize)
             .build()
@@ -106,7 +102,6 @@ impl Terrain {
             Some(index) => {
                 let index = index.as_ivec2();
                 let around = self.grid.around(index);
-                // info!("{:?} {:?}", index, around);
                 around.center().clone().map(|v| Survey {
                     world: self.grid.grid_to_world(index) + v.world_y(),
                     location: index,
@@ -124,6 +119,10 @@ impl Terrain {
 
     fn bounds(&self) -> Vec2 {
         self.options.size.as_vec2() * Vec2::splat(TILE_SIZE)
+    }
+
+    fn grid(&self) -> &SquareGrid<HeightOnlyCell> {
+        &self.grid
     }
 }
 
@@ -193,6 +192,218 @@ impl Meshable for Terrain {
     }
 }
 
+#[derive(Bundle)]
+struct TileBundle {
+    pbr: PbrBundle,
+}
+
+impl TileBundle {
+    fn new(
+        position: Vec3,
+        cell: &HeightOnlyCell,
+        meshes: &mut ResMut<Assets<Mesh>>,
+        materials: &mut ResMut<Assets<StandardMaterial>>,
+    ) -> Self {
+        let mesh = cell.mesh();
+
+        Self {
+            pbr: PbrBundle {
+                mesh: meshes.add(mesh),
+                material: materials.add(Color::rgb(1., 1., 1.)),
+                transform: Transform::from_translation(position),
+                ..default()
+            },
+        }
+    }
+}
+
+#[derive(Bundle)]
+struct CombinedTerrainMeshBundle {
+    pbr: PbrBundle,
+}
+
+impl CombinedTerrainMeshBundle {
+    fn new(
+        mesh: Mesh,
+        texture: Image,
+        meshes: &mut ResMut<Assets<Mesh>>,
+        images: &mut ResMut<Assets<Image>>,
+        materials: &mut ResMut<Assets<StandardMaterial>>,
+    ) -> Self {
+        Self {
+            pbr: PbrBundle {
+                mesh: meshes.add(mesh),
+                material: materials.add(StandardMaterial {
+                    base_color: Color::rgb(1., 1., 1.),
+                    base_color_texture: Some(images.add(texture)),
+                    ..default()
+                }),
+                ..default()
+            },
+        }
+    }
+}
+
+#[derive(Bundle)]
+struct TerrainBundle {
+    name: Name,
+    lifetime: GamePlayLifetime,
+    terrain: Terrain,
+    ground: bevy_rts_camera::Ground,
+    collision_groups: CollisionGroups,
+    collider: Collider,
+    ivis: InheritedVisibility,
+    transform: GlobalTransform,
+}
+
+impl TerrainBundle {
+    fn new(terrain: Terrain, mesh: &Mesh) -> Self {
+        let collider = Collider::from_bevy_mesh(mesh, &ComputedColliderShape::ConvexHull)
+            .expect("terrain collider error");
+
+        Self {
+            name: Name::new("Terrain"),
+            lifetime: GamePlayLifetime,
+            terrain,
+            collider,
+            collision_groups: CollisionGroups::new(Group::all(), Group::all()),
+            ground: bevy_rts_camera::Ground,
+            ivis: InheritedVisibility::default(),
+            transform: GlobalTransform::default(),
+        }
+    }
+}
+
+#[derive(Bundle)]
+struct WaterBundle {
+    name: Name,
+    lifetime: GamePlayLifetime,
+    water: Water,
+    pbr: PbrBundle,
+    collider: Collider,
+    collision_groups: CollisionGroups,
+    wireframe: NoWireframe,
+    animator: Animator<Transform>,
+}
+
+impl WaterBundle {
+    fn new(
+        bounds: Vec2,
+        meshes: &mut ResMut<Assets<Mesh>>,
+        materials: &mut ResMut<Assets<StandardMaterial>>,
+    ) -> Self {
+        Self {
+            name: Name::new("Water"),
+            lifetime: GamePlayLifetime,
+            water: Water {},
+            pbr: PbrBundle {
+                mesh: meshes.add(Plane3d::default().mesh().size(bounds.x, bounds.y)),
+                material: materials.add(Color::rgba(0., 0., 1., 0.85)), // TODO WATER_COLOR
+                transform: Transform::from_xyz(0.0, -0.5, 0.0),
+                ..Default::default()
+            },
+            animator: Animator::new(WaterBundle::animation()),
+            wireframe: NoWireframe,
+            collision_groups: CollisionGroups::new(Group::all(), Group::all()),
+            collider: Collider::cuboid(bounds.x, 0.5, bounds.y),
+        }
+    }
+
+    fn animation() -> Tween<Transform> {
+        Tween::new(
+            EaseFunction::QuadraticInOut,
+            Duration::from_secs(2),
+            TransformPositionLens {
+                start: Vec3::ZERO,
+                end: Vec3::new(0.0, -0.01, 0.0),
+            },
+        )
+        .with_repeat_count(RepeatCount::Infinite)
+        .with_repeat_strategy(RepeatStrategy::MirroredRepeat)
+    }
+}
+
+#[derive(Bundle)]
+struct SunBundle {
+    name: Name,
+    lifetime: GamePlayLifetime,
+    light: DirectionalLightBundle,
+}
+
+impl SunBundle {
+    fn new() -> Self {
+        Self {
+            name: Name::new("Sun"),
+            lifetime: GamePlayLifetime,
+            light: DirectionalLightBundle {
+                directional_light: DirectionalLight {
+                    illuminance: 5000.,
+                    shadows_enabled: true,
+                    ..default()
+                },
+                transform: Transform {
+                    translation: Vec3::new(-6.0, 20.0, 0.0),
+                    rotation: Quat::from_rotation_x(-std::f32::consts::PI / 4.),
+                    ..default()
+                },
+                ..default()
+            },
+        }
+    }
+}
+
+fn generate_terrain(
+    settings: Res<Settings>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut images: ResMut<Assets<Image>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let options = TerrainOptions::new(TerrainSeed::new(settings.seed()), settings.size());
+    let terrain: Terrain = options.into();
+    let bounds = terrain.bounds();
+
+    let mesh = terrain.mesh();
+
+    if false {
+        let all = terrain.grid.local_to_world();
+        let tiles = terrain
+            .grid
+            .apply(|p, cell| {
+                let local = Vec3::new(p.x as f32, 0.0, p.y as f32) * Vec3::splat(TILE_SIZE) + all;
+                TileBundle::new(local, cell, &mut meshes, &mut materials)
+            })
+            .into_cells();
+
+        commands
+            .spawn(TerrainBundle::new(terrain, &mesh))
+            .with_children(|p| {
+                for tile in tiles.into_iter() {
+                    p.spawn(tile);
+                }
+            });
+    } else {
+        let texture =
+            textures::TerrainTextureBuilder::new(terrain.grid(), UVec2::splat(32)).build();
+
+        commands
+            .spawn(TerrainBundle::new(terrain, &mesh))
+            .with_children(|p| {
+                p.spawn(CombinedTerrainMeshBundle::new(
+                    mesh,
+                    texture,
+                    &mut meshes,
+                    &mut images,
+                    &mut materials,
+                ));
+            });
+    }
+
+    commands.spawn(WaterBundle::new(bounds, &mut meshes, &mut materials));
+
+    commands.spawn(SunBundle::new());
+}
+
 pub struct TerrainPlugin;
 
 impl Plugin for TerrainPlugin {
@@ -205,103 +416,4 @@ impl Plugin for TerrainPlugin {
                     .run_if(in_state(AppState::Game)),
             );
     }
-}
-
-#[derive(Bundle)]
-pub struct TerrainBundle {
-    lifetime: GamePlayLifetime,
-    terrain: Terrain,
-    pbr: PbrBundle,
-}
-
-#[derive(Bundle)]
-pub struct WaterBundle {
-    lifetime: GamePlayLifetime,
-    water: Water,
-    pbr: PbrBundle,
-}
-
-fn water_animation() -> Tween<Transform> {
-    Tween::new(
-        EaseFunction::QuadraticInOut,
-        Duration::from_secs(2),
-        TransformPositionLens {
-            start: Vec3::ZERO,
-            end: Vec3::new(0.0, -0.01, 0.0),
-        },
-    )
-    .with_repeat_count(RepeatCount::Infinite)
-    .with_repeat_strategy(RepeatStrategy::MirroredRepeat)
-}
-
-fn generate_terrain(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    settings: Res<Settings>,
-) {
-    let options = TerrainOptions::new(TerrainSeed::new(settings.seed()), settings.size());
-    let terrain: Terrain = options.into();
-    let bounds = terrain.bounds();
-
-    let terrain_mesh = terrain.mesh();
-    let ground_collider =
-        Collider::from_bevy_mesh(&terrain_mesh, &ComputedColliderShape::ConvexHull)
-            .expect("terrain collider error");
-
-    let terrain = TerrainBundle {
-        lifetime: GamePlayLifetime,
-        pbr: PbrBundle {
-            mesh: meshes.add(terrain_mesh),
-            material: materials.add(Color::rgb(1., 1., 1.)),
-            ..Default::default()
-        },
-        terrain,
-    };
-
-    commands.spawn((
-        Name::new("Ground"),
-        CollisionGroups::new(Group::all(), Group::all()),
-        bevy_rts_camera::Ground,
-        ground_collider,
-        terrain,
-    ));
-
-    let water = WaterBundle {
-        lifetime: GamePlayLifetime,
-        pbr: PbrBundle {
-            mesh: meshes.add(Plane3d::default().mesh().size(bounds.x, bounds.y)),
-            material: materials.add(Color::rgba(0., 0., 1., 0.95)), // TODO WATER_COLOR
-            transform: Transform::from_xyz(0.0, -0.5, 0.0),
-            ..Default::default()
-        },
-        water: Water {},
-    };
-
-    commands.spawn((
-        Name::new("Water"),
-        CollisionGroups::new(Group::all(), Group::all()),
-        Collider::cuboid(bounds.x, 0.5, bounds.y),
-        Animator::new(water_animation()),
-        NoWireframe,
-        water,
-    ));
-
-    commands.spawn((
-        Name::new("Sun"),
-        GamePlayLifetime,
-        DirectionalLightBundle {
-            directional_light: DirectionalLight {
-                illuminance: 5000.,
-                shadows_enabled: true,
-                ..default()
-            },
-            transform: Transform {
-                translation: Vec3::new(-6.0, 20.0, 0.0),
-                rotation: Quat::from_rotation_x(-std::f32::consts::PI / 4.),
-                ..default()
-            },
-            ..default()
-        },
-    ));
 }

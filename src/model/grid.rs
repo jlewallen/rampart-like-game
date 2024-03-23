@@ -21,6 +21,10 @@ impl<T> SquareGrid<T> {
         self.cells
     }
 
+    pub fn size(&self) -> UVec2 {
+        self.size
+    }
+
     pub fn set(&mut self, p: IVec2, value: T) {
         let index = self.coordinates_to_index(p).expect("set coordinates");
         self.cells[index] = value;

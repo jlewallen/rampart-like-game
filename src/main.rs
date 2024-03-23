@@ -71,9 +71,11 @@ impl Plugin for AppStatePlugin {
 }
 
 fn enter_game(
+    mut commands: Commands,
     mut app_state: ResMut<NextState<model::AppState>>,
     mut activity: ResMut<NextState<model::Activity>>,
 ) {
+    commands.insert_resource(model::Settings::default());
     app_state.set(model::AppState::Game);
     activity.set(model::Activity::Observing);
 }

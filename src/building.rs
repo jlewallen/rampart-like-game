@@ -7,6 +7,7 @@ use resources::BuildingResources;
 use super::model::*;
 
 mod resources;
+mod walls;
 
 use crate::{
     helpers::GamePlayLifetime,
