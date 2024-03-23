@@ -11,6 +11,8 @@ use noise::{
 use std::time::Duration;
 
 mod mesh;
+#[cfg(test)]
+mod tests;
 
 use crate::helpers::GamePlayLifetime;
 

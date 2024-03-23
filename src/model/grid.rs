@@ -217,34 +217,3 @@ impl<T: PartialEq> PartialEq for Around<T> {
         self.0 == other.0 && self.1 == other.1 && self.2 == other.2
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use crate::{model::Around, model::AroundCenter};
-
-    use super::*;
-
-    #[test]
-    fn test_around_square_grid() {
-        let grid: SquareGrid<u32> = SquareGrid::new_flat(UVec2::new(64, 64));
-        assert_eq!(grid.get_xy(IVec2::new(63, 63)), Some(&0));
-        assert_eq!(grid.get_xy(IVec2::new(64, 64)), None);
-        assert_eq!(grid.get_xy(IVec2::new(-1, -1)), None);
-        assert_eq!(
-            grid.around(IVec2::new(0, 0)),
-            Around::new((
-                (None, None, None),
-                (None, Some(0), Some(0)),
-                (None, Some(0), Some(0))
-            ))
-        );
-        assert_eq!(
-            grid.around(IVec2::new(63, 63)),
-            Around::new((
-                (Some(0), Some(0), None),
-                (Some(0), Some(0), None),
-                (None, None, None),
-            ))
-        );
-    }
-}

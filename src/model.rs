@@ -4,6 +4,8 @@ use bevy::{
 };
 
 mod grid;
+#[cfg(test)]
+mod tests;
 
 pub use grid::*;
 
