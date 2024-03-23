@@ -194,12 +194,6 @@ fn refresh_terrain(
     }
 }
 
-fn stop_placing(mut commands: Commands, placing: Query<(Entity, &Placing)>) {
-    if let Ok((entity, _)) = placing.get_single() {
-        commands.entity(entity).despawn_recursive();
-    }
-}
-
 fn start_placing(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -225,6 +219,12 @@ fn start_placing(
             ..default()
         },
     ));
+}
+
+fn stop_placing(mut commands: Commands, placing: Query<(Entity, &Placing)>) {
+    if let Ok((entity, _)) = placing.get_single() {
+        commands.entity(entity).despawn_recursive();
+    }
 }
 
 fn placing(

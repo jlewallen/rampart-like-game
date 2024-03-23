@@ -20,6 +20,18 @@ impl HeightOnlyCell {
     pub fn iter(&self) -> impl Iterator<Item = &f64> {
         self.0.iter()
     }
+
+    pub fn world_y(&self) -> Vec3 {
+        Vec3::new(
+            0.,
+            *self
+                .0
+                .iter()
+                .max_by(|a, b| a.partial_cmp(b).unwrap())
+                .unwrap() as f32,
+            0.,
+        )
+    }
 }
 
 impl Meshable for HeightOnlyCell {

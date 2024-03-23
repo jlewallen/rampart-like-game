@@ -103,7 +103,7 @@ impl Terrain {
                 let around = self.grid.around(index);
                 // info!("{:?} {:?}", index, around);
                 around.center().clone().map(|v| Survey {
-                    world: self.grid.grid_to_world(index),
+                    world: self.grid.grid_to_world(index) + v.world_y(),
                     location: index,
                     cell: v.into(),
                 })
@@ -112,6 +112,7 @@ impl Terrain {
         }
     }
 
+    #[allow(dead_code)]
     fn size(&self) -> UVec2 {
         self.options.size
     }
