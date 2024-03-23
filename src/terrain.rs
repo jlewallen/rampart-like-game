@@ -14,7 +14,7 @@ mod mesh;
 #[cfg(test)]
 mod tests;
 
-use crate::helpers::GamePlayLifetime;
+use crate::{helpers::GamePlayLifetime, Settings};
 
 use self::mesh::{HeightOnlyCell, RectangularMapping};
 
@@ -35,15 +35,20 @@ impl TerrainSeed {
     }
 }
 
-#[derive(Debug)]
-struct TerrainOptions {
+#[derive(Debug, Clone)]
+pub struct TerrainOptions {
     seed: TerrainSeed,
     size: UVec2,
 }
 
 impl TerrainOptions {
+    #[allow(dead_code)]
     fn new(seed: TerrainSeed, size: UVec2) -> Self {
         Self { seed, size }
+    }
+
+    pub fn size(&self) -> UVec2 {
+        self.size
     }
 
     fn noise(&self) -> NoiseMap {
@@ -59,6 +64,15 @@ impl TerrainOptions {
         PlaneMapBuilder::new(terraced)
             .set_size(self.size.x as usize, self.size.y as usize)
             .build()
+    }
+}
+
+impl Default for TerrainOptions {
+    fn default() -> Self {
+        Self {
+            size: UVec2::new(64, 64),
+            seed: TerrainSeed::new(Seed::system_time()),
+        }
     }
 }
 
@@ -233,12 +247,9 @@ fn generate_terrain(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    settings: Res<Settings>,
 ) {
-    let seed = TerrainSeed::new(Seed::system_time());
-    info!("seed: {:?}", seed);
-
-    let options = TerrainOptions::new(seed, UVec2::new(64, 64));
-    let terrain: Terrain = options.into();
+    let terrain: Terrain = settings.terrain_options.clone().into();
     let bounds = terrain.bounds();
 
     let terrain_mesh = terrain.mesh();

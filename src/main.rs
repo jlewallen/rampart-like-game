@@ -54,6 +54,7 @@ fn main() {
         .add_systems(PostUpdate, bevy::window::close_on_esc)
         .insert_resource(ClearColor(Color::hex("152238").unwrap()))
         .insert_resource(WireframeConfig::default())
+        .insert_resource(Settings::default())
         .insert_state(model::Phase::default())
         .run();
 }
@@ -89,5 +90,16 @@ fn progress_game(
         let after = before.next();
         info!("{:?} -> {:?}", before, after);
         next_phase.set(after);
+    }
+}
+
+#[derive(Debug, Default, Resource)]
+pub struct Settings {
+    terrain_options: terrain::TerrainOptions,
+}
+
+impl Settings {
+    pub fn terrain_options(&self) -> &terrain::TerrainOptions {
+        &self.terrain_options
     }
 }

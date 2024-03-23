@@ -16,7 +16,7 @@ pub const WALL_WIDTH: f32 = 0.4;
 pub const TILE_SIZE: f32 = 1.0;
 pub const HEIGHT_SCALE: f32 = 1.0;
 pub const ROUND_SHOT_DIAMETER: f32 = 0.25;
-pub const BRICK_COLOR: &str = "E7444A";
+pub const BRICK_COLOR: &str = "e7444a";
 
 // We base all the math on a desired time of flight that
 // looks appropriate for the distance.
