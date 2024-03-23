@@ -2,101 +2,50 @@ use bevy::prelude::*;
 use bevy_mod_picking::prelude::*;
 use bevy_rapier3d::prelude::*;
 
+use resources::BuildingResources;
+
 use super::model::*;
 
+mod resources;
+
 use crate::{
-    pick_coordinates,
-    resources::{self, Structures},
-    ActivePlayer, Cannon, ConnectingWall, ConstructionEvent, Coordinates, Phase, Structure,
-    StructureLayers, Terrain, Wall, GROUND_DEPTH, WALL_HEIGHT,
+    helpers::GamePlayLifetime, model::Coordinates, model::GROUND_DEPTH, model::WALL_HEIGHT,
+    terrain::SurveyedCell, terrain::Terrain,
 };
 
 pub struct BuildingPlugin;
 
 impl Plugin for BuildingPlugin {
     fn build(&self, app: &mut App) {
-        if false {
-            app.add_systems(Startup, setup_structures)
-                .add_systems(Update, (place_wall.run_if(should_place_wall),))
-                .add_systems(Update, (place_cannon.run_if(should_place_cannon),))
-                .add_systems(Update, refresh_terrain)
-                .init_resource::<StructureLayers>();
-        } else {
-            app.add_systems(Update, keyboard)
-                .add_systems(Update, placing)
-                .add_systems(Update, try_place);
-        }
+        app.init_resource::<StructureLayers>()
+            .add_systems(PreStartup, resources::load)
+            .add_event::<ConstructionEvent>()
+            .add_systems(OnEnter(AppState::Game), setup_structures)
+            .add_systems(Update, refresh_terrain.run_if(in_state(AppState::Game)))
+            .add_systems(OnEnter(Activity::Building), start_placing)
+            .add_systems(OnExit(Activity::Building), stop_placing)
+            .add_systems(Update, placing.run_if(in_state(Activity::Building)))
+            .add_systems(Update, try_place.run_if(in_state(Activity::Building)));
     }
-}
-
-fn should_place_wall(state: Res<State<Phase>>) -> bool {
-    matches!(state.get(), Phase::Fortify(_))
-}
-
-fn should_place_cannon(state: Res<State<Phase>>) -> bool {
-    matches!(state.get(), Phase::Arm(_))
-}
-
-fn place_wall(
-    player: Res<ActivePlayer>,
-    events: EventReader<Pointer<Click>>,
-    targets: Query<(&Transform, &Name, Option<&Coordinates>), Without<Cannon>>,
-    mut modified: EventWriter<ConstructionEvent>,
-) {
-    let picked = pick_coordinates(events, targets);
-    if picked.is_none() {
-        return;
-    }
-
-    let picked = picked.expect("No picked");
-
-    info!("place-wall p={:?}", &picked);
-
-    modified.send(ConstructionEvent::new(
-        picked.coordinates,
-        Structure::Wall(Wall {
-            player: player.player().clone(),
-            entity: None,
-        }),
-    ));
-}
-
-fn place_cannon(
-    player: Res<ActivePlayer>,
-    events: EventReader<Pointer<Click>>,
-    targets: Query<(&Transform, &Name, Option<&Coordinates>), Without<Cannon>>,
-    mut modified: EventWriter<ConstructionEvent>,
-) {
-    let picked = pick_coordinates(events, targets);
-    if picked.is_none() {
-        return;
-    }
-
-    let picked = picked.expect("No picked");
-
-    info!("place-cannon p={:?}", &picked);
-
-    modified.send(ConstructionEvent::new(
-        picked.coordinates,
-        Structure::Cannon(Cannon {
-            player: player.player().clone(),
-            entity: None,
-        }),
-    ));
 }
 
 fn create_structure(
     commands: &mut Commands,
-    _terrain: &StructureLayers,
+    terrain: &StructureLayers,
     grid: IVec2,
-    position: &Vec2,
+    position: Vec3,
     item: &Structure,
-    structures: &Res<Structures>,
+    resources: &Res<BuildingResources>,
 ) {
     match item {
         Structure::Wall(wall) => {
-            // let around = &terrain.structure_layer.around(grid);
-            let connecting: ConnectingWall = ConnectingWall::Unknown; // around.into();
+            let around = terrain.structure_layer.around(grid);
+
+            let connecting: ConnectingWall = around.into();
+
+            let offset = Vec3::Y * (WALL_HEIGHT / 2.) + (GROUND_DEPTH / 2.);
+
+            let position = position + offset;
 
             // info!("create-structure {:?} {:?}", grid, connecting);
 
@@ -104,13 +53,10 @@ fn create_structure(
                 .spawn((
                     Name::new(format!("Wall{:?}", &grid)),
                     SpatialBundle {
-                        transform: Transform::from_xyz(
-                            position.x,
-                            (WALL_HEIGHT / 2.) + (GROUND_DEPTH / 2.),
-                            position.y,
-                        ),
+                        transform: Transform::from_translation(position),
                         ..default()
                     },
+                    GamePlayLifetime,
                     PickableBundle::default(),
                     Collider::cuboid(TILE_SIZE / 2., STRUCTURE_HEIGHT / 2., TILE_SIZE / 2.),
                     CollisionGroups::new(Group::all(), Group::all()),
@@ -131,21 +77,21 @@ fn create_structure(
                     */
                     ConnectingWall::NorthSouth => {
                         parent.spawn(PbrBundle {
-                            mesh: structures.north_south.clone(),
-                            material: structures.simple.clone(),
+                            mesh: resources.north_south.clone(),
+                            material: resources.simple.clone(),
                             ..default()
                         });
                     }
                     ConnectingWall::EastWest => {
                         parent.spawn(PbrBundle {
-                            mesh: structures.east_west.clone(),
-                            material: structures.simple.clone(),
+                            mesh: resources.east_west.clone(),
+                            material: resources.simple.clone(),
                             ..default()
                         });
                     }
                     ConnectingWall::Corner(angle) => {
                         parent.spawn(SceneBundle {
-                            scene: structures.corner.clone(),
+                            scene: resources.corner.clone(),
                             transform: Transform::from_rotation(Quat::from_rotation_y(
                                 -(angle as f32 * std::f32::consts::PI / 180.),
                             )),
@@ -154,22 +100,21 @@ fn create_structure(
                     }
                     _ => {
                         parent.spawn(PbrBundle {
-                            mesh: structures.unknown.clone(),
+                            mesh: resources.unknown.clone(),
                             ..default()
                         });
                     }
                 });
         }
         Structure::Cannon(cannon) => {
+            let offset = Vec3::Y * STRUCTURE_HEIGHT / 2.0;
+            let position = position + offset;
             commands
                 .spawn((
                     Name::new(format!("Cannon{:?}", &grid)),
+                    GamePlayLifetime,
                     SpatialBundle {
-                        transform: Transform::from_xyz(
-                            position.x,
-                            STRUCTURE_HEIGHT / 2.0,
-                            position.y,
-                        ),
+                        transform: Transform::from_translation(position),
                         ..default()
                     },
                     PickableBundle::default(),
@@ -182,7 +127,7 @@ fn create_structure(
                 ))
                 .with_children(|parent| {
                     parent.spawn(SceneBundle {
-                        scene: structures.cannon.clone(),
+                        scene: resources.cannon.clone(),
                         transform: Transform::from_rotation(Quat::from_rotation_y(0.)),
                         ..default()
                     });
@@ -191,30 +136,32 @@ fn create_structure(
     }
 }
 
-fn setup_structures(
-    mut commands: Commands,
-    structure_layers: Res<StructureLayers>,
-    structures: Res<Structures>,
-) {
+fn setup_structures(mut commands: Commands, resources: Res<BuildingResources>) {
+    let mut structure_layers = StructureLayers::new(UVec2::new(64, 64));
+    structure_layers.create_castle(IVec2::new(4, 4), IVec2::new(4, 4), Player::One);
+    structure_layers.create_castle(IVec2::new(26, 26), IVec2::new(4, 4), Player::Two);
+
     for (grid, position, item) in structure_layers.structure_layer.layout() {
         if let Some(item) = item {
             create_structure(
                 &mut commands,
                 &structure_layers,
                 grid,
-                &position,
-                item,
-                &structures,
+                position,
+                &item,
+                &resources,
             )
         }
     }
+
+    commands.insert_resource(structure_layers);
 }
 
 fn refresh_terrain(
     mut commands: Commands,
     mut modified: EventReader<ConstructionEvent>,
     mut structure_layers: ResMut<StructureLayers>,
-    structures: Res<Structures>,
+    resources: Res<BuildingResources>,
 ) {
     for ev in modified.read() {
         info!("terrain-modified {:?}", ev);
@@ -240,42 +187,44 @@ fn refresh_terrain(
             &mut commands,
             &structure_layers,
             grid,
-            &position,
+            position,
             &structure,
-            &structures,
+            &resources,
         );
     }
 }
 
-fn keyboard(
-    keys: Res<ButtonInput<KeyCode>>,
-    placing: Query<(Entity, &Placing)>,
+fn stop_placing(mut commands: Commands, placing: Query<(Entity, &Placing)>) {
+    if let Ok((entity, _)) = placing.get_single() {
+        commands.entity(entity).despawn_recursive();
+    }
+}
+
+fn start_placing(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    placing: Query<(Entity, &Placing)>,
 ) {
-    if keys.just_pressed(KeyCode::KeyB) {
-        info!("{:?}", KeyCode::KeyB);
-
-        if let Ok((entity, _)) = placing.get_single() {
-            commands.entity(entity).despawn_recursive();
-        }
-
-        commands.spawn((
-            Name::new("Placing"),
-            Pickable::IGNORE,
-            Placing { allowed: true },
-            PbrBundle {
-                mesh: meshes.add(Cuboid::new(1., 0.2, 1.)),
-                material: materials.add(StandardMaterial {
-                    base_color: Color::WHITE,
-                    ..default()
-                }),
-                transform: Transform::from_translation(Vec3::Y),
-                ..default()
-            },
-        ));
+    if let Ok((entity, _)) = placing.get_single() {
+        commands.entity(entity).despawn_recursive();
     }
+
+    commands.spawn((
+        Name::new("Placing"),
+        Pickable::IGNORE,
+        GamePlayLifetime,
+        Placing { allowed: true },
+        PbrBundle {
+            mesh: meshes.add(Cuboid::new(TILE_SIZE, 0.2, TILE_SIZE)),
+            material: materials.add(StandardMaterial {
+                base_color: Color::WHITE,
+                ..default()
+            }),
+            transform: Transform::from_translation(Vec3::Y),
+            ..default()
+        },
+    ));
 }
 
 fn placing(
@@ -287,31 +236,32 @@ fn placing(
         return;
     }
 
-    let Some(_terrain) = terrain.get_single().ok() else {
-        warn!("no terrain");
+    let Some(terrain) = terrain.get_single().ok() else {
         return;
     };
 
     for event in events.read() {
         if let Some(position) = event.event.hit.position {
-            for (_, mut transform) in &mut placing {
-                *transform = Transform::from_translation(position);
+            if let Some(survey) = terrain.survey(position) {
+                for (_, mut transform) in &mut placing {
+                    *transform = Transform::from_translation(survey.world());
+                }
             }
         }
     }
 }
 
 fn try_place(
-    mut events: EventReader<Pointer<Click>>,
-    mut placing: Query<(&mut Placing, &mut Transform)>,
     terrain: Query<&Terrain>,
+    mut events: EventReader<Pointer<Click>>,
+    _placing: Query<(&mut Placing, &mut Transform)>,
+    mut modified: EventWriter<ConstructionEvent>,
 ) {
     if events.is_empty() {
         return;
     }
 
     let Some(terrain) = terrain.get_single().ok() else {
-        warn!("no terrain");
         return;
     };
 
@@ -319,10 +269,20 @@ fn try_place(
         if let Some(position) = event.event.hit.position {
             if let Some(survey) = terrain.survey(position) {
                 info!("{:#?}", survey);
-            }
 
-            for (_, mut transform) in &mut placing {
-                *transform = Transform::from_translation(position);
+                match survey.cell() {
+                    SurveyedCell::Ground(_cell) => {
+                        modified.send(ConstructionEvent::new(
+                            survey.location().into(),
+                            Structure::Wall(Wall {
+                                player: Player::One,
+                                entity: None,
+                            }),
+                        ));
+                    }
+                    SurveyedCell::Beach => {}
+                    SurveyedCell::Water => {}
+                }
             }
         }
     }
@@ -332,4 +292,102 @@ fn try_place(
 struct Placing {
     #[allow(dead_code)]
     allowed: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct ConstructionEvent(Coordinates, Structure);
+
+impl Event for ConstructionEvent {}
+
+impl ConstructionEvent {
+    pub fn new(coordinates: Coordinates, structure: Structure) -> Self {
+        Self(coordinates, structure)
+    }
+
+    pub fn coordinates(&self) -> &Coordinates {
+        &self.0
+    }
+
+    pub fn structure(&self) -> &Structure {
+        &self.1
+    }
+}
+
+#[derive(Default, Resource)]
+pub struct StructureLayers {
+    structure_layer: SquareGrid<Option<Structure>>,
+}
+
+impl StructureLayers {
+    pub fn new(size: UVec2) -> Self {
+        Self {
+            structure_layer: SquareGrid::new_flat(size),
+        }
+    }
+
+    pub fn create_castle(&mut self, center: IVec2, size: IVec2, player: Player) {
+        let (x0, y0) = (center.x - size.x / 2, center.y - size.y / 2);
+        let (x1, y1) = (center.x + size.x / 2, center.y + size.y / 2);
+
+        self.structure_layer.outline(
+            IVec2::new(x0 as i32, y0 as i32),
+            IVec2::new(x1 as i32, y1 as i32),
+            Some(Structure::Wall(Wall {
+                player: player.clone(),
+                entity: None,
+            })),
+        );
+
+        self.structure_layer.set(
+            IVec2::new(center.x as i32, center.y as i32),
+            Some(Structure::Cannon(Cannon {
+                player,
+                entity: None,
+            })),
+        );
+    }
+}
+
+#[derive(Component, Clone, Debug)]
+pub struct Wall {
+    player: Player,
+    #[allow(dead_code)]
+    entity: Option<Entity>,
+}
+
+#[derive(Component, Clone, Debug)]
+pub struct Cannon {
+    player: Player,
+    #[allow(dead_code)]
+    entity: Option<Entity>,
+}
+
+#[derive(Clone, Debug)]
+pub enum Structure {
+    Wall(Wall),
+    Cannon(Cannon),
+}
+
+#[derive(Debug)]
+#[allow(dead_code)]
+pub enum ConnectingWall {
+    // Isolated,
+    NorthSouth,
+    EastWest,
+    Corner(u32),
+    Unknown,
+}
+
+impl<T> From<Around<Option<Option<T>>>> for ConnectingWall {
+    fn from(value: Around<Option<Option<T>>>) -> Self {
+        match value {
+            Around((_, _, _), (_, _, Some(Some(_))), (_, Some(Some(_)), _)) => Self::Corner(0), // Bottom Right
+            Around((_, _, _), (Some(Some(_)), _, _), (_, Some(Some(_)), _)) => Self::Corner(90), // Bottom Left
+            Around((_, Some(Some(_)), _), (Some(Some(_)), _, _), (_, _, _)) => Self::Corner(180), // Top Left
+            Around((_, Some(Some(_)), _), (_, _, Some(Some(_))), (_, _, _)) => Self::Corner(270), // Top Right
+            Around(_, (Some(Some(_)), _, Some(Some(_))), _) => Self::EastWest,
+            Around((_, Some(Some(_)), _), (_, _, _), (_, Some(Some(_)), _)) => Self::NorthSouth,
+            Around((_, _, _), (_, _, _), (_, _, _)) => Self::Unknown,
+        }
+    }
 }

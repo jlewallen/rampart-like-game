@@ -1,12 +1,13 @@
+use bevy::{diagnostic::FrameTimeDiagnosticsPlugin, window::WindowResolution};
 use bevy::{
+    input::common_conditions::input_toggle_active,
     pbr::wireframe::{WireframeConfig, WireframePlugin},
     prelude::*,
 };
 use bevy_hanabi::prelude::*;
 use bevy_mod_picking::prelude::*;
 use bevy_rapier3d::prelude::*;
-
-use bevy::{diagnostic::FrameTimeDiagnosticsPlugin, window::WindowResolution};
+use bevy_tweening::TweeningPlugin;
 
 mod building;
 mod camera;
@@ -14,13 +15,8 @@ mod devel;
 mod firing;
 mod helpers;
 mod model;
-mod resources;
 mod terrain;
 mod ui;
-
-use bevy_tweening::TweeningPlugin;
-use model::*;
-use terrain::*;
 
 fn main() {
     App::new()
@@ -45,204 +41,46 @@ fn main() {
         .add_plugins(TweeningPlugin)
         .add_plugins(WireframePlugin)
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
-        // .add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new())
-        // .add_plugins(RapierDebugRenderPlugin::default())
-        // .add_plugins(LogDiagnosticsPlugin::default())
+        .add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new().run_if(input_toggle_active(false, KeyCode::KeyI)))
         .add_plugins(FrameTimeDiagnosticsPlugin)
         .add_plugins(helpers::HelpersPlugin)
+        .add_plugins(AppStatePlugin)
         .add_plugins(camera::CameraPlugin)
         .add_plugins(devel::DeveloperPlugin)
         .add_plugins(building::BuildingPlugin)
         .add_plugins(firing::FiringPlugin)
         .add_plugins(terrain::TerrainPlugin)
-        .add_systems(PreStartup, resources::load_structures)
         .add_systems(Update, progress_game)
-        .add_systems(FixedUpdate, (check_collisions.run_if(should_check_collisions),))
         .add_systems(PostUpdate, bevy::window::close_on_esc)
         .insert_resource(ClearColor(Color::hex("152238").unwrap()))
-        .insert_resource(WireframeConfig {
-            // The global wireframe config enables drawing of wireframes on every mesh,
-            // except those with `NoWireframe`. Meshes with `Wireframe` will always have a wireframe,
-            // regardless of the global configuration.
-            global: true,
-            // Controls the default color of all wireframes. Used as the default color for global wireframes.
-            // Can be changed per mesh using the `WireframeColor` component.
-            default_color: Color::WHITE,
-        })
-        .insert_state(Phase::default())
-        .add_event::<ConstructionEvent>()
-        .init_resource::<ActivePlayer>()
+        .insert_resource(WireframeConfig::default())
+        .insert_state(model::Phase::default())
         .run();
 }
 
-fn should_check_collisions(state: Res<State<Phase>>) -> bool {
-    match &state.get() {
-        Phase::Fortify(_) => false,
-        Phase::Arm(_) => false,
-        Phase::Target(_) => true,
+pub struct AppStatePlugin;
+
+impl Plugin for AppStatePlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_state(model::AppState::default())
+            .insert_state(model::Activity::default())
+            .add_systems(Startup, enter_game)
+            .add_systems(OnEnter(model::AppState::Menu), enter_game);
     }
 }
 
-fn check_collisions(
-    mut commands: Commands,
-    mut collision_events: EventReader<CollisionEvent>,
-    mut contact_force_events: EventReader<ContactForceEvent>,
-    mut effects: ResMut<Assets<EffectAsset>>,
-    projectiles: Query<Option<&RoundShot>>,
-    transforms: Query<&Transform>,
-    names: Query<&Name>,
+fn enter_game(
+    mut app_state: ResMut<NextState<model::AppState>>,
+    mut activity: ResMut<NextState<model::Activity>>,
 ) {
-    for collision_event in collision_events.read() {
-        match collision_event {
-            CollisionEvent::Started(first, second, _) => {
-                let (target, projectile) = {
-                    if projectiles
-                        .get(*first)
-                        .expect("Projectile check failed")
-                        .is_some()
-                    {
-                        (second, first)
-                    } else {
-                        (first, second)
-                    }
-                };
-
-                let showtime = transforms.get(*projectile).expect("No collision entity");
-
-                commands.entity(*projectile).despawn_recursive();
-
-                info!(
-                    "collision: target={:?} projectile={:?}",
-                    names.get(*target).map(|s| s.as_str()),
-                    names.get(*projectile).map(|s| s.as_str())
-                );
-
-                let mut colors = Gradient::new();
-                colors.add_key(0.0, Vec4::new(4.0, 4.0, 4.0, 1.0));
-                colors.add_key(0.1, Vec4::new(4.0, 4.0, 0.0, 1.0));
-                colors.add_key(0.9, Vec4::new(4.0, 0.0, 0.0, 1.0));
-                colors.add_key(1.0, Vec4::new(4.0, 0.0, 0.0, 0.0));
-
-                let mut sizes = Gradient::new();
-                sizes.add_key(0.0, Vec2::splat(0.1));
-                sizes.add_key(0.3, Vec2::splat(0.1));
-                sizes.add_key(1.0, Vec2::splat(0.0));
-
-                // Create a new expression module
-                let mut module = Module::default();
-                let position = SetPositionSphereModifier {
-                    dimension: ShapeDimension::Volume,
-                    center: module.lit(Vec3::ZERO),
-                    radius: module.lit(0.25),
-                };
-
-                let lifetime = module.lit(0.3);
-                let init_lifetime = SetAttributeModifier::new(Attribute::LIFETIME, lifetime);
-
-                let accel = module.lit(Vec3::new(0., -8., 0.));
-                let update_accel = AccelModifier::new(accel);
-
-                let update_drag = LinearDragModifier::new(module.lit(5.));
-
-                // TODO Leaking?
-                let effect = effects.add(
-                    EffectAsset::new(32768, Spawner::once(500.0.into(), true), module)
-                        .init(position)
-                        .init(init_lifetime)
-                        .update(update_drag)
-                        .update(update_accel)
-                        .render(ColorOverLifetimeModifier { gradient: colors })
-                        .render(SizeOverLifetimeModifier {
-                            gradient: sizes,
-                            screen_space_size: true,
-                        }),
-                );
-
-                commands
-                    .spawn((
-                        Name::new("Explosion"),
-                        helpers::Expires::after(5.),
-                        SpatialBundle {
-                            transform: Transform::from_translation(showtime.translation),
-                            ..default()
-                        },
-                    ))
-                    .with_children(|child_builder| {
-                        child_builder.spawn((
-                            Name::new("Firework"),
-                            ParticleEffectBundle {
-                                effect: ParticleEffect::new(effect),
-                                ..Default::default()
-                            },
-                        ));
-                        child_builder.spawn((
-                            Name::new("Explosion:Light"),
-                            helpers::Expires::after(0.05),
-                            PointLightBundle {
-                                point_light: PointLight {
-                                    intensity: 15000.0,
-                                    shadows_enabled: true,
-                                    ..default()
-                                },
-                                ..default()
-                            },
-                        ));
-                    });
-            }
-            CollisionEvent::Stopped(_, _, _) => debug!("collision(stopped): {:?}", collision_event),
-        }
-    }
-
-    for contact_force_event in contact_force_events.read() {
-        info!("contact force: {:?}", contact_force_event);
-    }
+    app_state.set(model::AppState::Game);
+    activity.set(model::Activity::Observing);
 }
 
-#[derive(Debug, Clone)]
-pub struct PickedCoordinates {
-    name: String,
-    coordinates: Coordinates,
-    transform: Transform,
-}
-
-fn pick_coordinates(
-    mut events: EventReader<Pointer<Click>>,
-    targets: Query<(&Transform, &Name, Option<&Coordinates>), Without<Cannon>>,
-) -> Option<PickedCoordinates> {
-    for event in events.read() {
-        info!("{:#?}", event);
-
-        let target = targets.get(event.target).ok();
-
-        let Some((transform, target_name, coordinates)) = target else {
-            info!("pick-coordinate no target");
-            return None;
-        };
-
-        info!(
-            "pick-coordinate {:?} p={:?}",
-            target_name.as_str(),
-            &coordinates
-        );
-
-        if let Some(coordinates) = coordinates {
-            return Some(PickedCoordinates {
-                name: target_name.to_string(),
-                coordinates: coordinates.clone(),
-                transform: *transform,
-            });
-        }
-    }
-
-    None
-}
-
-pub fn progress_game(
-    phase: Res<State<Phase>>,
-    mut next_phase: ResMut<NextState<Phase>>,
-    mut player: ResMut<ActivePlayer>,
-    mut modified: EventReader<ConstructionEvent>,
-    mut _commands: Commands,
+fn progress_game(
+    phase: Res<State<model::Phase>>,
+    mut next_phase: ResMut<NextState<model::Phase>>,
+    mut modified: EventReader<building::ConstructionEvent>,
 ) {
     for event in modified.read() {
         println!("{:?}", event);
@@ -250,7 +88,6 @@ pub fn progress_game(
         let before = &phase.get();
         let after = before.next();
         info!("{:?} -> {:?}", before, after);
-        *player = ActivePlayer::new(after.player());
         next_phase.set(after);
     }
 }

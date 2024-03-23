@@ -1,8 +1,13 @@
-use bevy::{math::primitives, prelude::*};
+use bevy::math::primitives;
+use bevy::prelude::*;
+use bevy_hanabi::prelude::*;
+use bevy_hanabi::{EffectAsset, Gradient};
 use bevy_mod_picking::prelude::*;
 use bevy_rapier3d::prelude::*;
 
-use crate::{helpers, pick_coordinates};
+use crate::helpers::GamePlayLifetime;
+use crate::terrain::Terrain;
+use crate::{building::Cannon, helpers};
 
 use super::model::*;
 
@@ -10,23 +15,44 @@ pub struct FiringPlugin;
 
 impl Plugin for FiringPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (pick_target.run_if(should_pick_target),));
+        app.add_event::<ExplosionEvent>()
+            .add_systems(Update, pick_target.run_if(in_state(Activity::Firing)))
+            .add_systems(Update, check_collisions.run_if(in_state(Activity::Firing)));
     }
 }
 
-fn should_pick_target(state: Res<State<Phase>>) -> bool {
-    matches!(state.get(), Phase::Target(_))
+pub trait Projectile {}
+
+#[derive(Component, Clone, Debug)]
+pub struct RoundShot {}
+
+impl Projectile for RoundShot {}
+
+#[derive(Debug, Clone)]
+struct PickedCoordinates {
+    transform: Transform,
+}
+
+fn get_picked_coordinates(mut events: EventReader<Pointer<Click>>) -> Option<PickedCoordinates> {
+    for event in events.read() {
+        if let Some(position) = event.event.hit.position {
+            return Some(PickedCoordinates {
+                transform: Transform::from_translation(position),
+            });
+        }
+    }
+
+    None
 }
 
 fn pick_target(
     events: EventReader<Pointer<Click>>,
-    targets: Query<(&Transform, &Name, Option<&Coordinates>), Without<Cannon>>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut cannons: Query<(Entity, &mut Transform, &Player, &Name), With<Cannon>>,
+    mut cannons: Query<(Entity, &mut Transform, &Player), With<Cannon>>,
 ) {
-    let picked = pick_coordinates(events, targets);
+    let picked: Option<PickedCoordinates> = get_picked_coordinates(events);
     if picked.is_none() {
         return;
     }
@@ -41,11 +67,10 @@ fn pick_target(
         ..default()
     });
 
-    let (target, target_name) = (picked.transform, picked.name);
-    let target = target.translation;
+    let target = picked.transform.translation;
 
     match cannons.iter_mut().next() {
-        Some((_e, mut cannon, player, cannon_name)) => {
+        Some((_e, mut cannon, player)) => {
             let zero_y = Vec3::new(1., 0., 1.);
             let direction = (target - cannon.translation) * zero_y;
             let distance = direction.length();
@@ -74,13 +99,11 @@ fn pick_target(
             let aim_angle = direction.angle_between(Vec3::new(-1., 0., 0.));
             cannon.rotation = Quat::from_rotation_y(aim_angle);
 
-            let vertical_offset = Vec3::new(0., (WALL_HEIGHT / 2.0) + (ROUND_SHOT_SIZE / 2.0), 0.);
+            let vertical_offset =
+                Vec3::new(0., (WALL_HEIGHT / 2.0) + (ROUND_SHOT_DIAMETER / 2.0), 0.);
             let initial = cannon.translation + vertical_offset;
 
-            info!(
-                %distance, %velocity,
-                "firing ({:?}) {} -> {} (initial={})", player, cannon_name.as_str(), target_name.as_str(), initial
-            );
+            info!(%distance, %velocity, "firing ({:?}) (initial={})", player, initial);
 
             commands.spawn((
                 Name::new("Muzzle:Light"),
@@ -102,18 +125,19 @@ fn pick_target(
                     mesh,
                     material: black,
                     transform: Transform::from_translation(initial).with_scale(Vec3::new(
-                        ROUND_SHOT_SIZE,
-                        ROUND_SHOT_SIZE,
-                        ROUND_SHOT_SIZE,
+                        ROUND_SHOT_DIAMETER,
+                        ROUND_SHOT_DIAMETER,
+                        ROUND_SHOT_DIAMETER,
                     )),
                     ..default()
                 },
                 ColliderMassProperties::Mass(mass),
                 RigidBody::Dynamic,
+                GamePlayLifetime,
                 ActiveEvents::COLLISION_EVENTS,
                 RoundShot {},
                 player.clone(),
-                Collider::ball(ROUND_SHOT_SIZE / 2.),
+                Collider::ball(ROUND_SHOT_DIAMETER / 2.),
                 Velocity {
                     linvel: velocity,
                     angvel: Vec3::ZERO,
@@ -121,5 +145,145 @@ fn pick_target(
             ));
         }
         None => warn!("no cannons"),
+    }
+}
+
+fn check_collisions(
+    mut commands: Commands,
+    mut collision_events: EventReader<CollisionEvent>,
+    mut contact_force_events: EventReader<ContactForceEvent>,
+    mut explosions: EventWriter<ExplosionEvent>,
+    mut effects: ResMut<Assets<EffectAsset>>,
+    terrain: Query<&Terrain>,
+    projectiles: Query<Option<&RoundShot>>,
+    transforms: Query<&Transform>,
+    names: Query<&Name>,
+) {
+    for collision_event in collision_events.read() {
+        match collision_event {
+            CollisionEvent::Started(first, second, _) => {
+                let (target, projectile) = {
+                    if projectiles
+                        .get(*first)
+                        .expect("Projectile check failed")
+                        .is_some()
+                    {
+                        (second, first)
+                    } else {
+                        (first, second)
+                    }
+                };
+
+                let showtime = transforms.get(*projectile).expect("No collision entity");
+                let survey = terrain.single().survey(showtime.translation);
+
+                explosions.send(ExplosionEvent::new(showtime.translation));
+
+                commands.entity(*projectile).despawn_recursive();
+
+                info!(
+                    "collision: target={:?} projectile={:?} location={:?} survey={:?}",
+                    names.get(*target).map(|s| s.as_str()),
+                    names.get(*projectile).map(|s| s.as_str()),
+                    showtime.translation,
+                    survey
+                );
+
+                let mut colors = Gradient::new();
+                colors.add_key(0.0, Vec4::new(4.0, 4.0, 4.0, 1.0));
+                colors.add_key(0.1, Vec4::new(4.0, 4.0, 0.0, 1.0));
+                colors.add_key(0.9, Vec4::new(4.0, 0.0, 0.0, 1.0));
+                colors.add_key(1.0, Vec4::new(4.0, 0.0, 0.0, 0.0));
+
+                let mut sizes = Gradient::new();
+                sizes.add_key(0.0, Vec2::splat(0.1));
+                sizes.add_key(0.3, Vec2::splat(0.1));
+                sizes.add_key(1.0, Vec2::splat(0.0));
+
+                let mut module = Module::default();
+                let position = SetPositionSphereModifier {
+                    dimension: ShapeDimension::Volume,
+                    center: module.lit(Vec3::ZERO),
+                    radius: module.lit(0.25),
+                };
+
+                let lifetime = module.lit(0.3);
+                let init_lifetime = SetAttributeModifier::new(Attribute::LIFETIME, lifetime);
+
+                let accel = module.lit(Vec3::new(0., -8., 0.));
+                let update_accel = AccelModifier::new(accel);
+
+                let update_drag = LinearDragModifier::new(module.lit(5.));
+
+                // TODO Leaking?
+                let effect = effects.add(
+                    EffectAsset::new(32768, Spawner::once(500.0.into(), true), module)
+                        .init(position)
+                        .init(init_lifetime)
+                        .update(update_drag)
+                        .update(update_accel)
+                        .render(ColorOverLifetimeModifier { gradient: colors })
+                        .render(SizeOverLifetimeModifier {
+                            gradient: sizes,
+                            screen_space_size: true,
+                        }),
+                );
+
+                commands
+                    .spawn((
+                        Name::new("Explosion"),
+                        helpers::Expires::after(5.),
+                        SpatialBundle {
+                            transform: Transform::from_translation(showtime.translation),
+                            ..default()
+                        },
+                    ))
+                    .with_children(|child_builder| {
+                        child_builder.spawn((
+                            Name::new("Firework"),
+                            ParticleEffectBundle {
+                                effect: ParticleEffect::new(effect),
+                                ..Default::default()
+                            },
+                        ));
+                        child_builder.spawn((
+                            Name::new("Explosion:Light"),
+                            helpers::Expires::after(0.05),
+                            PointLightBundle {
+                                point_light: PointLight {
+                                    intensity: 15000.0,
+                                    shadows_enabled: true,
+                                    ..default()
+                                },
+                                ..default()
+                            },
+                        ));
+                    });
+            }
+            CollisionEvent::Stopped(_, _, _) => debug!("collision(stopped): {:?}", collision_event),
+        }
+    }
+
+    for contact_force_event in contact_force_events.read() {
+        info!("contact force: {:?}", contact_force_event);
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ExplosionEvent {
+    #[allow(dead_code)]
+    world: Vec3,
+}
+
+impl Event for ExplosionEvent {}
+
+impl ExplosionEvent {
+    pub fn new(world: Vec3) -> Self {
+        Self { world }
+    }
+
+    #[allow(dead_code)]
+    pub fn world(&self) -> Vec3 {
+        self.world
     }
 }

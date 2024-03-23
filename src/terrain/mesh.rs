@@ -7,7 +7,7 @@ use bevy::{
 };
 use noise::utils::NoiseMap;
 
-use crate::{SquareGrid, TILE_SIZE};
+use crate::{model::SquareGrid, model::HEIGHT_SCALE, model::TILE_SIZE};
 
 #[derive(Debug, Clone)]
 pub struct HeightOnlyCell([f64; 4]);
@@ -16,9 +16,11 @@ impl HeightOnlyCell {
     pub fn new(value: [f64; 4]) -> Self {
         Self(value)
     }
-}
 
-const HEIGHT_SCALE: f32 = 1.0;
+    pub fn iter(&self) -> impl Iterator<Item = &f64> {
+        self.0.iter()
+    }
+}
 
 impl Meshable for HeightOnlyCell {
     type Output = Mesh;
@@ -34,8 +36,8 @@ impl Meshable for HeightOnlyCell {
         ];
 
         let normals = vec![Vec3::Y.to_array(); 4];
-        let uvs = vec![[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0]];
         let indices = Indices::U32(vec![0, 1, 2, 0, 2, 3]);
+        let uvs = vec![[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0]];
 
         Mesh::new(
             PrimitiveTopology::TriangleList,
@@ -172,12 +174,13 @@ fn get_color(val: f32) -> Color {
         v if v < 0.2 => Color::hex("#0da50d"),
         v if v < 0.3 => Color::hex("#10cb10"),
         v if v < 0.4 => Color::hex("#18ed18"),
-        v if v < 0.5 => Color::hex("#3ff03f"),
-        v if v < 0.6 => Color::hex("#65f365"),
-        v if v < 0.7 => Color::hex("#8cf68c"),
-        v if v < 0.8 => Color::hex("#b2f9b2"),
-        v if v < 0.9 => Color::hex("#d9fcd9"),
-        v if v <= 1.0 => Color::hex("#ffffff"),
+        // v if v < 0.5 => Color::hex("#3ff03f"),
+        // v if v < 0.6 => Color::hex("#65f365"),
+        // v if v < 0.7 => Color::hex("#8cf68c"),
+        // v if v < 0.8 => Color::hex("#b2f9b2"),
+        // v if v < 0.9 => Color::hex("#d9fcd9"),
+        // v if v <= 1.0 => Color::hex("#ffffff"),
+        v if v <= 1.0 => Color::hex("#18ed18"),
         _ => panic!("unexpected value"),
     };
     color.expect("bad color")

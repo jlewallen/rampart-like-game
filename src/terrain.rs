@@ -12,11 +12,11 @@ use std::time::Duration;
 
 mod mesh;
 
+use crate::helpers::GamePlayLifetime;
+
 use self::mesh::{HeightOnlyCell, RectangularMapping};
 
-use super::model::Seed;
-use super::model::TILE_SIZE;
-use crate::{AroundCenter, SquareGrid};
+use super::model::{AppState, AroundCenter, Seed, SquareGrid, TILE_SIZE};
 
 #[derive(Clone, Default, Debug)]
 struct TerrainSeed {
@@ -24,7 +24,6 @@ struct TerrainSeed {
 }
 
 impl TerrainSeed {
-    #[allow(dead_code)]
     pub fn new(seed: Seed<u32>) -> Self {
         Self { seed }
     }
@@ -75,12 +74,14 @@ impl Terrain {
         let local = position + self.grid.world_to_local() + (TILE_SIZE / 2.0);
         let local = local.xz();
 
-        info!(
-            "world-to-local={:?} position={:?} local={:?}",
-            self.grid.world_to_local(),
-            position,
-            local
-        );
+        if false {
+            info!(
+                "world-to-local={:?} position={:?} local={:?}",
+                self.grid.world_to_local(),
+                position,
+                local
+            );
+        }
 
         if local.x > self.options.size.x as f32
             || local.y > self.options.size.y as f32
@@ -97,9 +98,13 @@ impl Terrain {
         match self.world_to_grid(position) {
             Some(index) => {
                 let index = index.as_ivec2();
-                info!("{:?} {:#?}", index, self.grid.around(index));
-
-                None
+                let around = self.grid.around(index);
+                // info!("{:?} {:?}", index, around);
+                around.center().clone().map(|v| Survey {
+                    world: self.grid.grid_to_world(index),
+                    location: index,
+                    cell: v.into(),
+                })
             }
             None => None,
         }
@@ -110,12 +115,46 @@ impl Terrain {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
-pub enum Survey {
-    Ground,
+pub struct Survey {
+    world: Vec3,
+    location: IVec2,
+    cell: SurveyedCell,
+}
+
+impl Survey {
+    pub fn world(&self) -> Vec3 {
+        self.world
+    }
+
+    pub fn location(&self) -> IVec2 {
+        self.location
+    }
+
+    pub fn cell(&self) -> &SurveyedCell {
+        &self.cell
+    }
+}
+
+#[derive(Debug)]
+pub enum SurveyedCell {
+    Ground(HeightOnlyCell),
     Beach,
     Water,
+}
+
+impl From<HeightOnlyCell> for SurveyedCell {
+    fn from(value: HeightOnlyCell) -> Self {
+        let all_below_0 = value.iter().all(|v| *v < 0.);
+        let any_below_0 = value.iter().any(|v| *v < 0.);
+        if all_below_0 {
+            SurveyedCell::Water
+        } else if any_below_0 {
+            SurveyedCell::Beach
+        } else {
+            SurveyedCell::Ground(value)
+        }
+    }
 }
 
 impl From<TerrainOptions> for Terrain {
@@ -146,21 +185,26 @@ pub struct TerrainPlugin;
 
 impl Plugin for TerrainPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, generate_terrain).add_systems(
-            Update,
-            component_animator_system::<Water>.in_set(AnimationSystem::AnimationUpdate),
-        );
+        app.add_systems(OnEnter(AppState::Game), generate_terrain)
+            .add_systems(
+                Update,
+                component_animator_system::<Water>
+                    .in_set(AnimationSystem::AnimationUpdate)
+                    .run_if(in_state(AppState::Game)),
+            );
     }
 }
 
 #[derive(Bundle)]
 pub struct TerrainBundle {
+    lifetime: GamePlayLifetime,
     terrain: Terrain,
     pbr: PbrBundle,
 }
 
 #[derive(Bundle)]
 pub struct WaterBundle {
+    lifetime: GamePlayLifetime,
     water: Water,
     pbr: PbrBundle,
 }
@@ -171,7 +215,7 @@ fn water_animation() -> Tween<Transform> {
         Duration::from_secs(2),
         TransformPositionLens {
             start: Vec3::ZERO,
-            end: Vec3::new(0.0, -0.02, 0.0),
+            end: Vec3::new(0.0, -0.01, 0.0),
         },
     )
     .with_repeat_count(RepeatCount::Infinite)
@@ -183,41 +227,51 @@ fn generate_terrain(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let seed = TerrainSeed::default();
+    let seed = TerrainSeed::new(Seed::system_time());
+    info!("seed: {:?}", seed);
+
     let options = TerrainOptions::new(seed, UVec2::new(64, 64));
     let terrain: Terrain = options.into();
     let size = terrain.size().as_vec2();
 
+    let terrain_mesh = terrain.mesh();
+    let ground_collider =
+        Collider::from_bevy_mesh(&terrain_mesh, &ComputedColliderShape::ConvexHull)
+            .expect("terrain collider error");
+
     let terrain = TerrainBundle {
+        lifetime: GamePlayLifetime,
         pbr: PbrBundle {
-            mesh: meshes.add(terrain.mesh()),
+            mesh: meshes.add(terrain_mesh),
             material: materials.add(Color::rgb(1., 1., 1.)),
             ..Default::default()
         },
         terrain,
     };
 
+    commands.spawn((
+        Name::new("Ground"),
+        CollisionGroups::new(Group::all(), Group::all()),
+        bevy_rts_camera::Ground,
+        ground_collider,
+        terrain,
+    ));
+
     let water = WaterBundle {
+        lifetime: GamePlayLifetime,
         pbr: PbrBundle {
             mesh: meshes.add(Plane3d::default().mesh().size(size.x, size.y)),
-            material: materials.add(Color::rgba(0., 0., 1., 0.95)),
+            material: materials.add(Color::rgba(0., 0., 1., 0.95)), // TODO WATER_COLOR
+            transform: Transform::from_xyz(0.0, -0.5, 0.0),
             ..Default::default()
         },
         water: Water {},
     };
 
     commands.spawn((
-        Name::new("Ground"),
-        CollisionGroups::new(Group::all(), Group::all()),
-        Collider::cuboid(size.x, 0.1, size.y),
-        bevy_rts_camera::Ground,
-        terrain,
-    ));
-
-    commands.spawn((
         Name::new("Water"),
         CollisionGroups::new(Group::all(), Group::all()),
-        Collider::cuboid(size.x, 0.1, size.y),
+        Collider::cuboid(size.x, 0.5, size.y),
         Animator::new(water_animation()),
         NoWireframe,
         water,
@@ -225,6 +279,7 @@ fn generate_terrain(
 
     commands.spawn((
         Name::new("Sun"),
+        GamePlayLifetime,
         DirectionalLightBundle {
             directional_light: DirectionalLight {
                 illuminance: 5000.,

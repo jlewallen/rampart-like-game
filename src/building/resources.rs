@@ -1,10 +1,10 @@
 use bevy::{math::primitives, prelude::*};
 use bevy_mod_picking::prelude::*;
 
-use super::model::*;
+use crate::model::*;
 
 #[derive(Resource)]
-pub struct Structures {
+pub struct BuildingResources {
     pub simple: Handle<StandardMaterial>,
     pub unknown: Handle<Mesh>,
     pub east_west: Handle<Mesh>,
@@ -13,7 +13,7 @@ pub struct Structures {
     pub cannon: Handle<Scene>,
 }
 
-pub fn load_structures(
+pub fn load(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -38,7 +38,7 @@ pub fn load_structures(
         WALL_WIDTH,
     )));
 
-    commands.insert_resource(Structures {
+    commands.insert_resource(BuildingResources {
         simple,
         unknown,
         east_west,

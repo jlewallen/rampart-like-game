@@ -1,10 +1,13 @@
 use bevy::prelude::*;
 
+use crate::model::AppState;
+
 pub struct HelpersPlugin;
 
 impl Plugin for HelpersPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(PostUpdate, expirations)
+            .add_systems(OnExit(AppState::Game), destroy_lifetime::<GamePlayLifetime>)
             .add_systems(PostUpdate, expanding);
     }
 }
@@ -12,7 +15,7 @@ impl Plugin for HelpersPlugin {
 #[derive(Component, Clone)]
 pub struct Expandable {}
 
-pub fn expanding(mut expandables: Query<(&mut Transform, &Expandable)>, timer: Res<Time>) {
+fn expanding(mut expandables: Query<(&mut Transform, &Expandable)>, timer: Res<Time>) {
     for (mut transform, _expandable) in &mut expandables {
         transform.scale += Vec3::splat(0.3) * timer.delta_seconds()
     }
@@ -33,7 +36,7 @@ impl Expires {
     }
 }
 
-pub fn expirations(
+fn expirations(
     mut commands: Commands,
     mut expires: Query<(Entity, &mut Expires, Option<&Name>)>,
     timer: Res<Time>,
@@ -52,3 +55,19 @@ pub fn expirations(
         }
     }
 }
+
+pub trait Lifetime {}
+
+fn destroy_lifetime<T>(mut commands: Commands, removing: Query<(Entity, &T)>)
+where
+    T: Lifetime + Component,
+{
+    for (entity, _) in removing.iter() {
+        commands.entity(entity).despawn_recursive();
+    }
+}
+
+#[derive(Default, Component)]
+pub struct GamePlayLifetime;
+
+impl Lifetime for GamePlayLifetime {}

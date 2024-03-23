@@ -1,6 +1,6 @@
 use bevy::math::*;
 
-use crate::TILE_SIZE;
+use crate::model::TILE_SIZE;
 
 pub trait XyIndex<T> {
     fn get_xy(&self, p: IVec2) -> Option<&T>;
@@ -93,11 +93,12 @@ impl<T> SquareGrid<T> {
         -self.world_to_local()
     }
 
-    pub fn grid_to_world(&self, grid: IVec2) -> Vec2 {
-        grid.as_vec2()
+    pub fn grid_to_world(&self, grid: IVec2) -> Vec3 {
+        let grid = grid.as_vec2();
+        Vec3::new(grid.x, 0., grid.y) + self.local_to_world()
     }
 
-    pub fn layout(&self) -> Vec<(IVec2, Vec2, &T)> {
+    pub fn layout(&self) -> Vec<(IVec2, Vec3, &T)> {
         self.cells
             .iter()
             .enumerate()
@@ -108,6 +109,15 @@ impl<T> SquareGrid<T> {
                 (grid, self.grid_to_world(grid), value)
             })
             .collect()
+    }
+}
+
+impl<T: Default> Default for SquareGrid<T> {
+    fn default() -> Self {
+        Self {
+            size: Default::default(),
+            cells: Default::default(),
+        }
     }
 }
 
@@ -149,7 +159,7 @@ pub trait AroundCenter<T> {
 }
 
 #[derive(Debug)]
-pub struct Around<T>((T, T, T), (T, T, T), (T, T, T));
+pub struct Around<T>(pub (T, T, T), pub (T, T, T), pub (T, T, T));
 
 impl<T> Around<T> {
     #[cfg(test)]
@@ -164,10 +174,14 @@ impl<T> Around<T> {
             (map_fn(&self.2 .0), map_fn(&self.2 .1), map_fn(&self.2 .2)),
         )
     }
+
+    pub fn center(&self) -> &T {
+        &self.1 .1
+    }
 }
 
 impl Around<IVec2> {
-    pub fn center(c: IVec2) -> Self {
+    pub fn centered(c: IVec2) -> Self {
         Self(
             (
                 IVec2::new(c.x - 1, c.y - 1),
@@ -194,7 +208,7 @@ where
     V: Clone,
 {
     fn around(&self, center: IVec2) -> Around<Option<V>> {
-        Around::center(center).map(|xy| self.get_xy(*xy).cloned())
+        Around::centered(center).map(|xy| self.get_xy(*xy).cloned())
     }
 }
 
@@ -206,7 +220,7 @@ impl<T: PartialEq> PartialEq for Around<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Around, AroundCenter};
+    use crate::{model::Around, model::AroundCenter};
 
     use super::*;
 
@@ -214,6 +228,8 @@ mod tests {
     fn test_around_square_grid() {
         let grid: SquareGrid<u32> = SquareGrid::new_flat(UVec2::new(64, 64));
         assert_eq!(grid.get_xy(IVec2::new(63, 63)), Some(&0));
+        assert_eq!(grid.get_xy(IVec2::new(64, 64)), None);
+        assert_eq!(grid.get_xy(IVec2::new(-1, -1)), None);
         assert_eq!(
             grid.around(IVec2::new(0, 0)),
             Around::new((
