@@ -140,7 +140,6 @@ fn try_place(
                             survey.location().into(),
                             Structure::Wall(Wall {
                                 player: Player::One,
-                                entity: None,
                             }),
                         ));
                     }
@@ -227,16 +226,12 @@ impl StructureLayers {
             IVec2::new(x1 as i32, y1 as i32),
             StructureEntity::New(Structure::Wall(Wall {
                 player: player.clone(),
-                entity: None,
             })),
         );
 
         self.entities.set(
             IVec2::new(center.x as i32, center.y as i32),
-            StructureEntity::New(Structure::Cannon(Cannon {
-                player,
-                entity: None,
-            })),
+            StructureEntity::New(Structure::Cannon(Cannon { player })),
         );
     }
 
@@ -390,15 +385,11 @@ impl StructureLayers {
 #[derive(Component, Clone, Debug)]
 pub struct Wall {
     player: Player,
-    #[allow(dead_code)]
-    entity: Option<Entity>,
 }
 
 #[derive(Component, Clone, Debug)]
 pub struct Cannon {
     player: Player,
-    #[allow(dead_code)]
-    entity: Option<Entity>,
 }
 
 #[derive(Clone, Debug)]
@@ -407,8 +398,16 @@ pub enum Structure {
     Cannon(Cannon),
 }
 
+impl Structure {
+    fn as_wall(self) -> Option<Structure> {
+        match self {
+            Structure::Wall(w) => Some(Structure::Wall(w)),
+            Structure::Cannon(_) => None,
+        }
+    }
+}
+
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum ConnectingWall {
     Isolated,
     NorthSouth,
@@ -418,38 +417,29 @@ pub enum ConnectingWall {
 }
 
 fn simplify(v: Option<StructureEntity>) -> Option<Structure> {
-    v.and_then(|v| v.structure())
+    v.and_then(|v| v.structure()).and_then(|v| v.as_wall())
 }
 
 impl From<Around<Option<Structure>>> for ConnectingWall {
     fn from(value: Around<Option<Structure>>) -> Self {
         match value {
-            Around(
-                (_, _, _),
-                (_, _, Some(Structure::Wall(_))),
-                (_, Some(Structure::Wall(_)), _),
-            ) => Self::Corner(0), // Bottom Right
-            Around(
-                (_, _, _),
-                (Some(Structure::Wall(_)), _, _),
-                (_, Some(Structure::Wall(_)), _),
-            ) => Self::Corner(90), // Bottom Left
-            Around(
-                (_, Some(Structure::Wall(_)), _),
-                (Some(Structure::Wall(_)), _, _),
-                (_, _, _),
-            ) => Self::Corner(180), // Top Left
-            Around(
-                (_, Some(Structure::Wall(_)), _),
-                (_, _, Some(Structure::Wall(_))),
-                (_, _, _),
-            ) => Self::Corner(270), // Top Right
-            Around(_, (Some(Structure::Wall(_)), _, Some(Structure::Wall(_))), _) => Self::EastWest,
-            Around(
-                (_, Some(Structure::Wall(_)), _),
-                (_, _, _),
-                (_, Some(Structure::Wall(_)), _),
-            ) => Self::NorthSouth,
+            Around((None, None, None), (None, _, Some(_)), (None, Some(_), None)) => {
+                Self::Corner(0)
+            } // Bottom Right
+            Around((None, None, None), (Some(_), _, None), (None, Some(_), None)) => {
+                Self::Corner(90)
+            } // Bottom Left
+            Around((None, Some(_), None), (Some(_), _, None), (None, None, None)) => {
+                Self::Corner(180)
+            } // Top Left
+            Around((None, Some(_), None), (None, _, Some(_)), (None, None, None)) => {
+                Self::Corner(270)
+            } // Top Right
+            Around((None, None, None), (Some(_), _, Some(_)), (None, None, None)) => Self::EastWest,
+            Around((None, Some(_), None), (None, _, None), (None, Some(_), None)) => {
+                Self::NorthSouth
+            }
+            Around((None, None, None), (None, Some(_), None), (None, None, None)) => Self::Isolated,
             Around((_, _, _), (_, _, _), (_, _, _)) => Self::Unknown,
         }
     }
