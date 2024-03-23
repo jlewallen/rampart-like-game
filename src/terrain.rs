@@ -63,7 +63,7 @@ impl TerrainOptions {
 }
 
 #[derive(Component, Debug)]
-pub struct Water {}
+struct Water {}
 
 #[derive(Component)]
 pub struct Terrain {
@@ -114,6 +114,10 @@ impl Terrain {
 
     fn size(&self) -> UVec2 {
         self.options.size
+    }
+
+    fn bounds(&self) -> Vec2 {
+        self.options.size.as_vec2() * Vec2::splat(TILE_SIZE)
     }
 }
 
@@ -234,7 +238,7 @@ fn generate_terrain(
 
     let options = TerrainOptions::new(seed, UVec2::new(64, 64));
     let terrain: Terrain = options.into();
-    let size = terrain.size().as_vec2();
+    let bounds = terrain.bounds();
 
     let terrain_mesh = terrain.mesh();
     let ground_collider =
@@ -262,7 +266,7 @@ fn generate_terrain(
     let water = WaterBundle {
         lifetime: GamePlayLifetime,
         pbr: PbrBundle {
-            mesh: meshes.add(Plane3d::default().mesh().size(size.x, size.y)),
+            mesh: meshes.add(Plane3d::default().mesh().size(bounds.x, bounds.y)),
             material: materials.add(Color::rgba(0., 0., 1., 0.95)), // TODO WATER_COLOR
             transform: Transform::from_xyz(0.0, -0.5, 0.0),
             ..Default::default()
@@ -273,7 +277,7 @@ fn generate_terrain(
     commands.spawn((
         Name::new("Water"),
         CollisionGroups::new(Group::all(), Group::all()),
-        Collider::cuboid(size.x, 0.5, size.y),
+        Collider::cuboid(bounds.x, 0.5, bounds.y),
         Animator::new(water_animation()),
         NoWireframe,
         water,

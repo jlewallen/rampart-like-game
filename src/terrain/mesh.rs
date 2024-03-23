@@ -70,7 +70,7 @@ where
 
         let meshes = self
             .apply(|p, cell| {
-                let local = Vec3::new(p.x as f32, 0.0, p.y as f32) + all;
+                let local = Vec3::new(p.x as f32, 0.0, p.y as f32) * Vec3::splat(TILE_SIZE) + all;
                 cell.mesh().translated_by(local)
             })
             .into_cells();
