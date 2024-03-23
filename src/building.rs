@@ -12,7 +12,6 @@ use crate::{
     helpers::GamePlayLifetime,
     model::{Coordinates, GROUND_DEPTH, WALL_HEIGHT},
     terrain::{SurveyedCell, Terrain},
-    Settings,
 };
 
 pub struct BuildingPlugin;
@@ -36,15 +35,10 @@ fn setup_structures(
     resources: Res<BuildingResources>,
     settings: Res<Settings>,
 ) {
-    let mut structures = StructureLayers::new(settings.terrain_options.size());
+    let mut structures = StructureLayers::new(settings.size());
     structures.create_castle(IVec2::new(4, 4), IVec2::new(4, 4), Player::One);
     structures.create_castle(IVec2::new(26, 26), IVec2::new(4, 4), Player::Two);
-
-    for (grid, position, item) in structures.layer.layout() {
-        if let Some(item) = item {
-            structures.create_entity(&mut commands, grid, position, &item, &resources)
-        }
-    }
+    structures.refresh_entities(&mut commands, &resources);
 
     commands.insert_resource(structures);
 }
@@ -59,16 +53,8 @@ fn refresh_terrain(
         info!("terrain-modified {:?}", ev);
 
         let grid = ev.coordinates().clone().into();
-        let structure = ev.structure().clone();
-        let position = structures.layer.grid_to_world(grid);
-        let existing = structures.layer.get_xy(grid).expect("Out of bounds");
-        if existing.is_some() {
-            return;
-        }
-
-        structures.layer.set(grid, Some(structure.clone()));
-
-        structures.create_entity(&mut commands, grid, position, &structure, &resources);
+        structures.set(grid, ev.structure().clone());
+        structures.refresh_entities(&mut commands, &resources);
     }
 }
 
@@ -191,15 +177,44 @@ impl ConstructionEvent {
     }
 }
 
+#[derive(Default, Clone)]
+pub enum StructureEntity {
+    #[default]
+    Empty,
+    New(Structure),
+    Affected(Structure, Entity),
+    Current(Structure, Entity),
+}
+
+impl StructureEntity {
+    fn affected(&self) -> Self {
+        match self {
+            StructureEntity::Empty => StructureEntity::Empty,
+            StructureEntity::New(s) => StructureEntity::New(s.clone()),
+            StructureEntity::Affected(s, e) => StructureEntity::Affected(s.clone(), e.clone()),
+            StructureEntity::Current(s, e) => StructureEntity::Affected(s.clone(), e.clone()),
+        }
+    }
+
+    fn structure(self) -> Option<Structure> {
+        match self {
+            StructureEntity::Empty => None,
+            StructureEntity::New(s) => Some(s),
+            StructureEntity::Affected(s, _) => Some(s),
+            StructureEntity::Current(s, _) => Some(s),
+        }
+    }
+}
+
 #[derive(Default, Resource)]
 pub struct StructureLayers {
-    structure_layer: SquareGrid<Option<Structure>>,
+    entities: SquareGrid<StructureEntity>,
 }
 
 impl StructureLayers {
     pub fn new(size: UVec2) -> Self {
         Self {
-            structure_layer: SquareGrid::new_flat(size),
+            entities: SquareGrid::new_flat(size),
         }
     }
 
@@ -207,22 +222,61 @@ impl StructureLayers {
         let (x0, y0) = (center.x - size.x / 2, center.y - size.y / 2);
         let (x1, y1) = (center.x + size.x / 2, center.y + size.y / 2);
 
-        self.layer.outline(
+        self.entities.outline(
             IVec2::new(x0 as i32, y0 as i32),
             IVec2::new(x1 as i32, y1 as i32),
-            Some(Structure::Wall(Wall {
+            StructureEntity::New(Structure::Wall(Wall {
                 player: player.clone(),
                 entity: None,
             })),
         );
 
-        self.layer.set(
+        self.entities.set(
             IVec2::new(center.x as i32, center.y as i32),
-            Some(Structure::Cannon(Cannon {
+            StructureEntity::New(Structure::Cannon(Cannon {
                 player,
                 entity: None,
             })),
         );
+    }
+
+    fn set(&mut self, grid: IVec2, structure: Structure) {
+        self.entities.set(grid, StructureEntity::New(structure));
+
+        for v in Around::centered(grid).to_vec().into_iter() {
+            if let Some(e) = self.entities.get(v) {
+                self.entities.set(v, e.affected());
+            }
+        }
+    }
+
+    fn refresh_entities(&mut self, commands: &mut Commands, resources: &Res<BuildingResources>) {
+        let mut refreshing = Vec::default();
+
+        for (grid, position, item) in self.entities.layout() {
+            match item {
+                StructureEntity::New(item) => {
+                    let entity = self.create_entity(commands, grid, position, item, resources);
+                    refreshing.push((grid, StructureEntity::Current(item.clone(), entity)))
+                }
+                StructureEntity::Affected(item, e) => match item {
+                    Structure::Wall(_) => {
+                        commands.entity(e.clone()).despawn_recursive();
+                        let entity = self.create_entity(commands, grid, position, item, resources);
+                        refreshing.push((grid, StructureEntity::Current(item.clone(), entity)))
+                    }
+                    Structure::Cannon(_) => {
+                        refreshing.push((grid, StructureEntity::Current(item.clone(), e.clone())))
+                    }
+                },
+                StructureEntity::Current(_, _) => {}
+                StructureEntity::Empty => {}
+            }
+        }
+
+        for (grid, update) in refreshing.into_iter() {
+            self.entities.set(grid, update);
+        }
     }
 
     fn create_entity(
@@ -232,18 +286,18 @@ impl StructureLayers {
         position: Vec3,
         item: &Structure,
         resources: &Res<BuildingResources>,
-    ) {
+    ) -> Entity {
         match item {
             Structure::Wall(wall) => {
-                let around = self.layer.around(grid);
+                let around = self.entities.around(grid);
 
-                let connecting: ConnectingWall = around.into();
+                let connecting: ConnectingWall = around.map(simplify).into();
 
-                let offset = Vec3::Y * (WALL_HEIGHT / 2.) + (GROUND_DEPTH / 2.);
+                let offset = Vec3::Y * ((WALL_HEIGHT / 2.) + (GROUND_DEPTH / 2.));
 
                 let position = position + offset;
 
-                // info!("create-structure {:?} {:?}", grid, connecting);
+                info!(%grid, %position, %offset, "create-structure");
 
                 commands
                     .spawn((
@@ -298,10 +352,11 @@ impl StructureLayers {
                                 ..default()
                             });
                         }
-                    });
+                    })
+                    .id()
             }
             Structure::Cannon(cannon) => {
-                let offset = Vec3::Y * STRUCTURE_HEIGHT / 2.0;
+                let offset = Vec3::Y * (STRUCTURE_HEIGHT / 2.0);
                 let position = position + offset;
                 commands
                     .spawn((
@@ -325,7 +380,8 @@ impl StructureLayers {
                             transform: Transform::from_rotation(Quat::from_rotation_y(0.)),
                             ..default()
                         });
-                    });
+                    })
+                    .id()
             }
         }
     }
@@ -361,15 +417,39 @@ pub enum ConnectingWall {
     Unknown,
 }
 
-impl<T> From<Around<Option<Option<T>>>> for ConnectingWall {
-    fn from(value: Around<Option<Option<T>>>) -> Self {
+fn simplify(v: Option<StructureEntity>) -> Option<Structure> {
+    v.and_then(|v| v.structure())
+}
+
+impl From<Around<Option<Structure>>> for ConnectingWall {
+    fn from(value: Around<Option<Structure>>) -> Self {
         match value {
-            Around((_, _, _), (_, _, Some(Some(_))), (_, Some(Some(_)), _)) => Self::Corner(0), // Bottom Right
-            Around((_, _, _), (Some(Some(_)), _, _), (_, Some(Some(_)), _)) => Self::Corner(90), // Bottom Left
-            Around((_, Some(Some(_)), _), (Some(Some(_)), _, _), (_, _, _)) => Self::Corner(180), // Top Left
-            Around((_, Some(Some(_)), _), (_, _, Some(Some(_))), (_, _, _)) => Self::Corner(270), // Top Right
-            Around(_, (Some(Some(_)), _, Some(Some(_))), _) => Self::EastWest,
-            Around((_, Some(Some(_)), _), (_, _, _), (_, Some(Some(_)), _)) => Self::NorthSouth,
+            Around(
+                (_, _, _),
+                (_, _, Some(Structure::Wall(_))),
+                (_, Some(Structure::Wall(_)), _),
+            ) => Self::Corner(0), // Bottom Right
+            Around(
+                (_, _, _),
+                (Some(Structure::Wall(_)), _, _),
+                (_, Some(Structure::Wall(_)), _),
+            ) => Self::Corner(90), // Bottom Left
+            Around(
+                (_, Some(Structure::Wall(_)), _),
+                (Some(Structure::Wall(_)), _, _),
+                (_, _, _),
+            ) => Self::Corner(180), // Top Left
+            Around(
+                (_, Some(Structure::Wall(_)), _),
+                (_, _, Some(Structure::Wall(_))),
+                (_, _, _),
+            ) => Self::Corner(270), // Top Right
+            Around(_, (Some(Structure::Wall(_)), _, Some(Structure::Wall(_))), _) => Self::EastWest,
+            Around(
+                (_, Some(Structure::Wall(_)), _),
+                (_, _, _),
+                (_, Some(Structure::Wall(_)), _),
+            ) => Self::NorthSouth,
             Around((_, _, _), (_, _, _), (_, _, _)) => Self::Unknown,
         }
     }

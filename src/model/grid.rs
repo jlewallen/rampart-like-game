@@ -26,6 +26,11 @@ impl<T> SquareGrid<T> {
         self.cells[index] = value;
     }
 
+    pub fn get(&self, p: IVec2) -> Option<&T> {
+        self.coordinates_to_index(p)
+            .and_then(|index| self.cells.get(index))
+    }
+
     pub fn apply<V>(&self, mut map_fn: impl FnMut(UVec2, &T) -> V) -> SquareGrid<V> {
         let cells = self
             .cells
@@ -167,12 +172,19 @@ impl<T> Around<T> {
         Self(value.0, value.1, value.2)
     }
 
-    pub fn map<R>(&self, map_fn: impl Fn(&T) -> R) -> Around<R> {
+    pub fn map<R>(self, map_fn: impl Fn(T) -> R) -> Around<R> {
         Around(
-            (map_fn(&self.0 .0), map_fn(&self.0 .1), map_fn(&self.0 .2)),
-            (map_fn(&self.1 .0), map_fn(&self.1 .1), map_fn(&self.1 .2)),
-            (map_fn(&self.2 .0), map_fn(&self.2 .1), map_fn(&self.2 .2)),
+            (map_fn(self.0 .0), map_fn(self.0 .1), map_fn(self.0 .2)),
+            (map_fn(self.1 .0), map_fn(self.1 .1), map_fn(self.1 .2)),
+            (map_fn(self.2 .0), map_fn(self.2 .1), map_fn(self.2 .2)),
         )
+    }
+
+    pub fn to_vec(self) -> Vec<T> {
+        vec![
+            self.0 .0, self.0 .1, self.0 .2, self.1 .0, self.1 .1, self.1 .2, self.2 .0, self.2 .1,
+            self.2 .2,
+        ]
     }
 
     pub fn center(&self) -> &T {
@@ -208,7 +220,7 @@ where
     V: Clone,
 {
     fn around(&self, center: IVec2) -> Around<Option<V>> {
-        Around::centered(center).map(|xy| self.get_xy(*xy).cloned())
+        Around::centered(center).map(|xy| self.get_xy(xy).cloned())
     }
 }
 

@@ -1,6 +1,6 @@
 use bevy::{
-    ecs::{component::Component, schedule::States},
-    math::IVec2,
+    ecs::{component::Component, schedule::States, system::Resource},
+    math::{IVec2, UVec2},
 };
 
 mod grid;
@@ -142,4 +142,29 @@ pub enum AppState {
     #[default]
     Menu,
     Game,
+}
+
+#[derive(Debug, Resource)]
+pub struct Settings {
+    size: UVec2,
+    seed: Seed<u32>,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            seed: Seed::system_time(),
+            size: UVec2::new(64, 64),
+        }
+    }
+}
+
+impl Settings {
+    pub fn seed(&self) -> Seed<u32> {
+        self.seed
+    }
+
+    pub fn size(&self) -> UVec2 {
+        self.size
+    }
 }

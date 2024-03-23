@@ -14,7 +14,7 @@ mod mesh;
 #[cfg(test)]
 mod tests;
 
-use crate::{helpers::GamePlayLifetime, Settings};
+use crate::{helpers::GamePlayLifetime, model::Settings};
 
 use self::mesh::{HeightOnlyCell, RectangularMapping};
 
@@ -42,11 +42,11 @@ pub struct TerrainOptions {
 }
 
 impl TerrainOptions {
-    #[allow(dead_code)]
     fn new(seed: TerrainSeed, size: UVec2) -> Self {
         Self { seed, size }
     }
 
+    #[allow(dead_code)]
     pub fn size(&self) -> UVec2 {
         self.size
     }
@@ -64,15 +64,6 @@ impl TerrainOptions {
         PlaneMapBuilder::new(terraced)
             .set_size(self.size.x as usize, self.size.y as usize)
             .build()
-    }
-}
-
-impl Default for TerrainOptions {
-    fn default() -> Self {
-        Self {
-            size: UVec2::new(64, 64),
-            seed: TerrainSeed::new(Seed::system_time()),
-        }
     }
 }
 
@@ -249,7 +240,8 @@ fn generate_terrain(
     mut materials: ResMut<Assets<StandardMaterial>>,
     settings: Res<Settings>,
 ) {
-    let terrain: Terrain = settings.terrain_options.clone().into();
+    let options = TerrainOptions::new(TerrainSeed::new(settings.seed()), settings.size());
+    let terrain: Terrain = options.into();
     let bounds = terrain.bounds();
 
     let terrain_mesh = terrain.mesh();
