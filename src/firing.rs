@@ -243,8 +243,8 @@ fn check_collisions(
                 colors.add_key(1.0, Vec4::new(4.0, 0.0, 0.0, 0.0));
 
                 let mut sizes = Gradient::new();
-                sizes.add_key(0.0, Vec2::splat(0.1));
-                sizes.add_key(0.3, Vec2::splat(0.1));
+                sizes.add_key(0.0, Vec2::splat(0.05));
+                sizes.add_key(0.7, Vec2::splat(0.05));
                 sizes.add_key(1.0, Vec2::splat(0.0));
 
                 let mut module = Module::default();
@@ -257,13 +257,13 @@ fn check_collisions(
                     center: module.lit(Vec3::ZERO),
                     speed: module.lit(6.),
                 };
-                let init_lifetime = SetAttributeModifier::new(Attribute::LIFETIME, module.lit(5.3));
+                let init_lifetime = SetAttributeModifier::new(Attribute::LIFETIME, module.lit(8.3));
                 let update_accel = AccelModifier::new(module.lit(Vec3::new(0., -8., 0.)));
                 let update_drag = LinearDragModifier::new(module.lit(5.));
 
                 // TODO Leaking?
                 let effect = effects.add(
-                    EffectAsset::new(4096, Spawner::once(500.0.into(), true), module)
+                    EffectAsset::new(1024, Spawner::once(500.0.into(), true), module)
                         .init(init_position)
                         .init(init_velocity)
                         .init(init_lifetime)
@@ -272,7 +272,7 @@ fn check_collisions(
                         .render(ColorOverLifetimeModifier { gradient: colors })
                         .render(SizeOverLifetimeModifier {
                             gradient: sizes,
-                            screen_space_size: true,
+                            screen_space_size: false,
                         }),
                 );
 
@@ -296,7 +296,7 @@ fn check_collisions(
                         ));
                         child_builder.spawn((
                             Name::new("Explosion:Light"),
-                            // helpers::Expires::after(0.05),
+                            helpers::Expires::after(0.05),
                             PointLightBundle {
                                 point_light: PointLight {
                                     intensity: 15000.0,
