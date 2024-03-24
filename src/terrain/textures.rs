@@ -67,22 +67,24 @@ impl Layers {
 impl Default for Layers {
     fn default() -> Self {
         Self(vec![
-            // water deep
-            Layer(0.3, Color::rgb_u8(51, 100, 197)),
-            // water shallow
-            Layer(0.4, Color::rgb_u8(57, 106, 203)),
+            // water 2
+            Layer(-0.50, Color::rgb_u8(51, 100, 197)),
+            // water 1
+            Layer(-0.95, Color::rgb_u8(57, 106, 203)),
             // sand
-            Layer(0.45, Color::rgb_u8(210, 208, 125)),
-            // grass
+            Layer(0.04, Color::rgb_u8(210, 208, 125)),
+            // grass 1
             Layer(0.55, Color::rgb_u8(86, 152, 23)),
             // grass 2
-            Layer(0.6, Color::rgb_u8(62, 107, 18)),
-            // rock
-            Layer(0.7, Color::rgb_u8(90, 69, 60)),
+            Layer(0.85, Color::rgb_u8(62, 107, 18)),
+            // grass 3
+            Layer(1.00, Color::rgb_u8(0x1b, 0x37, 0x20)),
+            // rock 1
+            // Layer(0.7, Color::rgb_u8(90, 69, 60)),
             // rock 2
-            Layer(0.9, Color::rgb_u8(75, 60, 53)),
+            // Layer(0.9, Color::rgb_u8(75, 60, 53)),
             // snow
-            Layer(1.0, Color::ANTIQUE_WHITE),
+            // Layer(1.0, Color::ANTIQUE_WHITE),
         ])
     }
 }
@@ -115,6 +117,18 @@ impl<'g> TerrainTextureBuilder<'g> {
                     }
                 }
             }
+        }
+
+        if false {
+            image::save_buffer_with_format(
+                "terrain.png",
+                &data,
+                image_size.x,
+                image_size.y,
+                image::ExtendedColorType::Rgba8,
+                image::ImageFormat::Png,
+            )
+            .unwrap();
         }
 
         Image::new(

@@ -33,6 +33,12 @@ impl<T: Default> Default for Seed<T> {
     }
 }
 
+impl<T> Seed<T> {
+    pub fn new(value: T) -> Self {
+        Self(value)
+    }
+}
+
 impl Seed<u32> {
     pub fn system_time() -> Seed<u32> {
         Seed(
@@ -146,8 +152,8 @@ pub enum AppState {
 
 #[derive(Debug, Resource)]
 pub struct Settings {
-    size: UVec2,
-    seed: Seed<u32>,
+    pub size: UVec2,
+    pub seed: Seed<u32>,
 }
 
 impl Default for Settings {

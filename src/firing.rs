@@ -45,6 +45,81 @@ fn get_picked_coordinates(mut events: EventReader<Pointer<Click>>) -> Option<Pic
     None
 }
 
+#[derive(Bundle)]
+struct MuzzleFlashBundle {
+    name: Name,
+    expiration: helpers::Expires,
+    light: PointLightBundle,
+}
+
+impl MuzzleFlashBundle {
+    fn new(position: Vec3) -> Self {
+        Self {
+            name: Name::new("Muzzle:Flash"),
+            expiration: helpers::Expires::after(0.05),
+            light: PointLightBundle {
+                transform: Transform::from_translation(position + Vec3::new(0., 1., 0.)),
+                point_light: PointLight {
+                    intensity: 100.0,
+                    shadows_enabled: true,
+                    ..default()
+                },
+                ..default()
+            },
+        }
+    }
+}
+
+#[derive(Bundle)]
+struct RoundShotBundle {
+    name: Name,
+    pbr: PbrBundle,
+    mass: ColliderMassProperties,
+    body: RigidBody,
+    lifetime: GamePlayLifetime,
+    active_events: ActiveEvents,
+    projectile: RoundShot,
+    player: Player,
+    collider: Collider,
+    velocity: Velocity,
+}
+
+impl RoundShotBundle {
+    fn new(
+        position: Vec3,
+        velocity: Vec3,
+        mass: f32,
+        player: Player,
+        mesh: Handle<Mesh>,
+        material: Handle<StandardMaterial>,
+    ) -> Self {
+        Self {
+            name: Name::new("Projectile:RoundShot"),
+            pbr: PbrBundle {
+                mesh,
+                material,
+                transform: Transform::from_translation(position).with_scale(Vec3::new(
+                    ROUND_SHOT_DIAMETER,
+                    ROUND_SHOT_DIAMETER,
+                    ROUND_SHOT_DIAMETER,
+                )),
+                ..default()
+            },
+            mass: ColliderMassProperties::Mass(mass),
+            body: RigidBody::Dynamic,
+            lifetime: GamePlayLifetime,
+            active_events: ActiveEvents::COLLISION_EVENTS,
+            projectile: RoundShot {},
+            player: player,
+            collider: Collider::ball(ROUND_SHOT_DIAMETER / 2.),
+            velocity: Velocity {
+                linvel: velocity,
+                angvel: Vec3::ZERO,
+            },
+        }
+    }
+}
+
 fn pick_target(
     events: EventReader<Pointer<Click>>,
     mut commands: Commands,
@@ -105,43 +180,15 @@ fn pick_target(
 
             info!(%distance, %velocity, "firing ({:?}) (initial={})", player, initial);
 
-            commands.spawn((
-                Name::new("Muzzle:Light"),
-                helpers::Expires::after(0.05),
-                PointLightBundle {
-                    transform: Transform::from_translation(initial + Vec3::new(0., 1., 0.)),
-                    point_light: PointLight {
-                        intensity: 100.0,
-                        shadows_enabled: true,
-                        ..default()
-                    },
-                    ..default()
-                },
-            ));
+            commands.spawn(MuzzleFlashBundle::new(initial));
 
-            commands.spawn((
-                Name::new("Projectile"),
-                PbrBundle {
-                    mesh,
-                    material: black,
-                    transform: Transform::from_translation(initial).with_scale(Vec3::new(
-                        ROUND_SHOT_DIAMETER,
-                        ROUND_SHOT_DIAMETER,
-                        ROUND_SHOT_DIAMETER,
-                    )),
-                    ..default()
-                },
-                ColliderMassProperties::Mass(mass),
-                RigidBody::Dynamic,
-                GamePlayLifetime,
-                ActiveEvents::COLLISION_EVENTS,
-                RoundShot {},
+            commands.spawn(RoundShotBundle::new(
+                initial,
+                velocity,
+                mass,
                 player.clone(),
-                Collider::ball(ROUND_SHOT_DIAMETER / 2.),
-                Velocity {
-                    linvel: velocity,
-                    angvel: Vec3::ZERO,
-                },
+                mesh,
+                black,
             ));
         }
         None => warn!("no cannons"),
@@ -201,24 +248,24 @@ fn check_collisions(
                 sizes.add_key(1.0, Vec2::splat(0.0));
 
                 let mut module = Module::default();
-                let position = SetPositionSphereModifier {
+                let init_position = SetPositionSphereModifier {
                     dimension: ShapeDimension::Volume,
                     center: module.lit(Vec3::ZERO),
                     radius: module.lit(0.25),
                 };
-
-                let lifetime = module.lit(0.3);
-                let init_lifetime = SetAttributeModifier::new(Attribute::LIFETIME, lifetime);
-
-                let accel = module.lit(Vec3::new(0., -8., 0.));
-                let update_accel = AccelModifier::new(accel);
-
+                let init_velocity = SetVelocitySphereModifier {
+                    center: module.lit(Vec3::ZERO),
+                    speed: module.lit(6.),
+                };
+                let init_lifetime = SetAttributeModifier::new(Attribute::LIFETIME, module.lit(5.3));
+                let update_accel = AccelModifier::new(module.lit(Vec3::new(0., -8., 0.)));
                 let update_drag = LinearDragModifier::new(module.lit(5.));
 
                 // TODO Leaking?
                 let effect = effects.add(
-                    EffectAsset::new(32768, Spawner::once(500.0.into(), true), module)
-                        .init(position)
+                    EffectAsset::new(4096, Spawner::once(500.0.into(), true), module)
+                        .init(init_position)
+                        .init(init_velocity)
                         .init(init_lifetime)
                         .update(update_drag)
                         .update(update_accel)
@@ -240,15 +287,16 @@ fn check_collisions(
                     ))
                     .with_children(|child_builder| {
                         child_builder.spawn((
-                            Name::new("Firework"),
+                            Name::new("Explosion:Burst"),
                             ParticleEffectBundle {
                                 effect: ParticleEffect::new(effect),
+                                transform: Transform::IDENTITY,
                                 ..Default::default()
                             },
                         ));
                         child_builder.spawn((
                             Name::new("Explosion:Light"),
-                            helpers::Expires::after(0.05),
+                            // helpers::Expires::after(0.05),
                             PointLightBundle {
                                 point_light: PointLight {
                                     intensity: 15000.0,

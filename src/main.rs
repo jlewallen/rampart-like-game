@@ -8,6 +8,8 @@ use bevy_hanabi::prelude::*;
 use bevy_mod_picking::prelude::*;
 use bevy_rapier3d::prelude::*;
 use bevy_tweening::TweeningPlugin;
+use clap::Parser;
+use model::Settings;
 
 mod building;
 mod camera;
@@ -18,7 +20,31 @@ mod model;
 mod terrain;
 mod ui;
 
+#[derive(Parser, Resource)]
+struct Options {
+    #[arg(long)]
+    seed: Option<u32>,
+    #[arg(long, default_value_t = 64)]
+    size: u32,
+}
+
+impl Options {
+    fn seed(&self) -> Option<model::Seed<u32>> {
+        self.seed.map(model::Seed::new)
+    }
+
+    fn settings(self) -> Settings {
+        Settings {
+            seed: self.seed().unwrap_or_else(|| model::Seed::system_time()),
+            size: UVec2::new(self.size, self.size),
+            ..default()
+        }
+    }
+}
+
 fn main() {
+    let options = Options::parse();
+
     App::new()
         .add_plugins(
             DefaultPlugins
@@ -54,7 +80,7 @@ fn main() {
         .add_systems(PostUpdate, bevy::window::close_on_esc)
         .insert_resource(ClearColor(Color::hex("152238").unwrap()))
         .insert_resource(WireframeConfig::default())
-        .insert_resource(model::Settings::default())
+        .insert_resource(options.settings())
         .insert_state(model::Phase::default())
         .run();
 }

@@ -436,10 +436,8 @@ impl From<Around<Option<Structure>>> for ConnectingWall {
             Around((None, Some(_), None), (None, _, Some(_)), (None, None, None)) => {
                 Self::Corner(270)
             } // Top Right
-            Around((None, None, None), (Some(_), _, Some(_)), (None, None, None)) => Self::EastWest,
-            Around((None, Some(_), None), (None, _, None), (None, Some(_), None)) => {
-                Self::NorthSouth
-            }
+            Around((_, None, _), (Some(_), _, Some(_)), (_, None, _)) => Self::EastWest,
+            Around((_, Some(_), _), (None, _, None), (_, Some(_), _)) => Self::NorthSouth,
             Around((None, None, None), (None, Some(_), None), (None, None, None)) => Self::Isolated,
             Around((_, _, _), (_, _, _), (_, _, _)) => Self::Unknown,
         }

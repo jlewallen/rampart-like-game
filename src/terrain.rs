@@ -193,36 +193,11 @@ impl Meshable for Terrain {
 }
 
 #[derive(Bundle)]
-struct TileBundle {
+struct TerrainMeshBundle {
     pbr: PbrBundle,
 }
 
-impl TileBundle {
-    fn new(
-        position: Vec3,
-        cell: &HeightOnlyCell,
-        meshes: &mut ResMut<Assets<Mesh>>,
-        materials: &mut ResMut<Assets<StandardMaterial>>,
-    ) -> Self {
-        let mesh = cell.mesh();
-
-        Self {
-            pbr: PbrBundle {
-                mesh: meshes.add(mesh),
-                material: materials.add(Color::rgb(1., 1., 1.)),
-                transform: Transform::from_translation(position),
-                ..default()
-            },
-        }
-    }
-}
-
-#[derive(Bundle)]
-struct CombinedTerrainMeshBundle {
-    pbr: PbrBundle,
-}
-
-impl CombinedTerrainMeshBundle {
+impl TerrainMeshBundle {
     fn new(
         mesh: Mesh,
         texture: Image,
@@ -359,49 +334,31 @@ fn generate_terrain(
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    info!("generating {:?}", settings.seed());
     let options = TerrainOptions::new(TerrainSeed::new(settings.seed()), settings.size());
     let terrain: Terrain = options.into();
     let bounds = terrain.bounds();
 
     let mesh = terrain.mesh();
+    info!("mesh");
 
-    if false {
-        let all = terrain.grid.local_to_world();
-        let tiles = terrain
-            .grid
-            .apply(|p, cell| {
-                let local = Vec3::new(p.x as f32, 0.0, p.y as f32) * Vec3::splat(TILE_SIZE) + all;
-                TileBundle::new(local, cell, &mut meshes, &mut materials)
-            })
-            .into_cells();
+    let texture = textures::TerrainTextureBuilder::new(terrain.grid(), UVec2::splat(32)).build();
+    info!("texture");
 
-        commands
-            .spawn(TerrainBundle::new(terrain, &mesh))
-            .with_children(|p| {
-                for tile in tiles.into_iter() {
-                    p.spawn(tile);
-                }
-            });
-    } else {
-        let texture =
-            textures::TerrainTextureBuilder::new(terrain.grid(), UVec2::splat(32)).build();
-
-        commands
-            .spawn(TerrainBundle::new(terrain, &mesh))
-            .with_children(|p| {
-                p.spawn(CombinedTerrainMeshBundle::new(
-                    mesh,
-                    texture,
-                    &mut meshes,
-                    &mut images,
-                    &mut materials,
-                ));
-            });
-    }
-
+    commands
+        .spawn(TerrainBundle::new(terrain, &mesh))
+        .with_children(|p| {
+            p.spawn(TerrainMeshBundle::new(
+                mesh,
+                texture,
+                &mut meshes,
+                &mut images,
+                &mut materials,
+            ));
+        });
     commands.spawn(WaterBundle::new(bounds, &mut meshes, &mut materials));
-
     commands.spawn(SunBundle::new());
+    info!("ready");
 }
 
 pub struct TerrainPlugin;
