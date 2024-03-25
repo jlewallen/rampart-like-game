@@ -2,11 +2,22 @@ use bevy::prelude::*;
 
 use crate::model::AppState;
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, States, Default)]
+pub enum ExpirationControl {
+    #[default]
+    Running,
+    Paused,
+}
+
 pub struct HelpersPlugin;
 
 impl Plugin for HelpersPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PostUpdate, expirations)
+        app.insert_state(ExpirationControl::default())
+            .add_systems(
+                PostUpdate,
+                expirations.run_if(in_state(ExpirationControl::Running)),
+            )
             .add_systems(OnExit(AppState::Game), destroy_lifetime::<GamePlayLifetime>)
             .add_systems(PostUpdate, expanding);
     }

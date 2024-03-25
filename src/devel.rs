@@ -1,6 +1,10 @@
 use bevy::{pbr::wireframe::WireframeConfig, prelude::*};
 
-use crate::{camera::CameraMode, model::Activity, model::AppState};
+use crate::{
+    camera::CameraMode,
+    helpers::ExpirationControl,
+    model::{Activity, AppState},
+};
 
 // .add_plugins(RapierDebugRenderPlugin::default())
 // .add_plugins(LogDiagnosticsPlugin::default())
@@ -16,13 +20,21 @@ impl Plugin for DeveloperPlugin {
 fn developer_keyboard(
     keys: Res<ButtonInput<KeyCode>>,
     camera_mode: Res<State<CameraMode>>,
+    expiration_control: Res<State<ExpirationControl>>,
     mut app_state: ResMut<NextState<AppState>>,
     mut new_camera_mode: ResMut<NextState<CameraMode>>,
     mut activity: ResMut<NextState<Activity>>,
     mut wireframe_config: ResMut<WireframeConfig>,
+    mut new_expiration_control: ResMut<NextState<ExpirationControl>>,
 ) {
     if keys.just_pressed(KeyCode::Space) {
         info!("{:?}", KeyCode::Space);
+    }
+    if keys.just_pressed(KeyCode::KeyE) {
+        match expiration_control.get() {
+            ExpirationControl::Running => new_expiration_control.set(ExpirationControl::Paused),
+            ExpirationControl::Paused => new_expiration_control.set(ExpirationControl::Running),
+        }
     }
     if keys.just_pressed(KeyCode::KeyR) {
         info!("resetting");
