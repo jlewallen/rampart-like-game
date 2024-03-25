@@ -60,7 +60,10 @@ impl MuzzleFlashBundle {
             light: PointLightBundle {
                 transform: Transform::from_translation(position + Vec3::new(0., 1., 0.)),
                 point_light: PointLight {
-                    intensity: 100.0,
+                    // 1,000,000 lumens is a very large "cinema light" capable of registering brightly at Bevy's
+                    // default "very overcast day" exposure level. For "indoor lighting" with a lower exposure,
+                    // this would be way too bright.
+                    intensity: 1_000_000.0,
                     shadows_enabled: true,
                     ..default()
                 },
@@ -110,7 +113,7 @@ impl RoundShotBundle {
             lifetime: GamePlayLifetime,
             active_events: ActiveEvents::COLLISION_EVENTS,
             projectile: RoundShot {},
-            player: player,
+            player,
             collider: Collider::ball(ROUND_SHOT_DIAMETER / 2.),
             velocity: Velocity {
                 linvel: velocity,
@@ -178,7 +181,7 @@ fn pick_target(
                 Vec3::new(0., (WALL_HEIGHT / 2.0) + (ROUND_SHOT_DIAMETER / 2.0), 0.);
             let initial = cannon.translation + vertical_offset;
 
-            info!(%distance, %velocity, "firing ({:?}) (initial={})", player, initial);
+            info!(%distance, %velocity, %initial, ?player, "firing");
 
             commands.spawn(MuzzleFlashBundle::new(initial));
 
@@ -201,6 +204,7 @@ fn check_collisions(
     mut contact_force_events: EventReader<ContactForceEvent>,
     mut explosions: EventWriter<ExplosionEvent>,
     mut effects: ResMut<Assets<EffectAsset>>,
+    asset_server: ResMut<AssetServer>,
     terrain: Query<&Terrain>,
     projectiles: Query<Option<&RoundShot>>,
     transforms: Query<&Transform>,
@@ -228,6 +232,8 @@ fn check_collisions(
 
                 commands.entity(*projectile).despawn_recursive();
 
+                let circle: Handle<Image> = asset_server.load("circle.png");
+
                 info!(
                     "collision: target={:?} projectile={:?} location={:?} survey={:?}",
                     names.get(*target).map(|s| s.as_str()),
@@ -243,27 +249,33 @@ fn check_collisions(
                 colors.add_key(1.0, Vec4::new(4.0, 0.0, 0.0, 0.0));
 
                 let mut sizes = Gradient::new();
-                sizes.add_key(0.0, Vec2::splat(0.05));
-                sizes.add_key(0.7, Vec2::splat(0.05));
+                sizes.add_key(0.0, Vec2::splat(0.15));
+                sizes.add_key(0.3, Vec2::splat(0.1));
+                sizes.add_key(0.8, Vec2::splat(0.01));
                 sizes.add_key(1.0, Vec2::splat(0.0));
 
                 let mut module = Module::default();
                 let init_position = SetPositionSphereModifier {
                     dimension: ShapeDimension::Volume,
                     center: module.lit(Vec3::ZERO),
-                    radius: module.lit(0.25),
+                    radius: module.lit(0.5),
                 };
                 let init_velocity = SetVelocitySphereModifier {
                     center: module.lit(Vec3::ZERO),
-                    speed: module.lit(6.),
+                    speed: module.lit(20.),
                 };
-                let init_lifetime = SetAttributeModifier::new(Attribute::LIFETIME, module.lit(8.3));
-                let update_accel = AccelModifier::new(module.lit(Vec3::new(0., -8., 0.)));
-                let update_drag = LinearDragModifier::new(module.lit(5.));
+                let init_lifetime = SetAttributeModifier::new(Attribute::LIFETIME, module.lit(2.0));
+                let update_accel = AccelModifier::new(module.lit(Vec3::new(0., -9.8, 0.)));
+                let update_drag = LinearDragModifier::new(module.lit(1.5));
+
+                let particle_texture_modifier = ParticleTextureModifier {
+                    texture: circle,
+                    sample_mapping: ImageSampleMapping::Modulate,
+                };
 
                 // TODO Leaking?
                 let effect = effects.add(
-                    EffectAsset::new(1024, Spawner::once(500.0.into(), true), module)
+                    EffectAsset::new(256, Spawner::once(256.0.into(), true), module)
                         .init(init_position)
                         .init(init_velocity)
                         .init(init_lifetime)
@@ -273,13 +285,14 @@ fn check_collisions(
                         .render(SizeOverLifetimeModifier {
                             gradient: sizes,
                             screen_space_size: false,
-                        }),
+                        })
+                        .render(particle_texture_modifier),
                 );
 
                 commands
                     .spawn((
                         Name::new("Explosion"),
-                        helpers::Expires::after(5.),
+                        helpers::Expires::after(2.5),
                         SpatialBundle {
                             transform: Transform::from_translation(showtime.translation),
                             ..default()
@@ -299,7 +312,10 @@ fn check_collisions(
                             helpers::Expires::after(0.05),
                             PointLightBundle {
                                 point_light: PointLight {
-                                    intensity: 15000.0,
+                                    // 1,000,000 lumens is a very large "cinema light" capable of registering brightly at Bevy's
+                                    // default "very overcast day" exposure level. For "indoor lighting" with a lower exposure,
+                                    // this would be way too bright.
+                                    intensity: 1_000_000.0,
                                     shadows_enabled: true,
                                     ..default()
                                 },

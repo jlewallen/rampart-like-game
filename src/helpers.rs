@@ -45,7 +45,7 @@ fn expirations(
         match expires.expiration {
             Some(expiration) => {
                 if timer.elapsed_seconds() > expiration {
-                    info!("expiring '{:?}'", name);
+                    debug!("expiring '{:?}'", name);
                     commands.entity(entity).despawn_recursive();
                 }
             }
