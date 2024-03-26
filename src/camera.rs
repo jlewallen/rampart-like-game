@@ -7,6 +7,7 @@ pub enum CameraMode {
     Normal,
     AllTopDown,
     AllAngled,
+    FirstPerson,
 }
 
 fn setup_camera(
@@ -34,6 +35,10 @@ fn setup_camera(
             transform: Transform::from_xyz(0., 64., 32.).looking_at(Vec3::new(0., 0., 6.), Vec3::Y),
             ..default()
         },)),
+        CameraMode::FirstPerson => commands.spawn((Camera3dBundle {
+            transform: Transform::from_xyz(0., 2., 0.).looking_at(Vec3::new(0., 2., -2.), Vec3::Y),
+            ..default()
+        },)),
     };
 }
 
@@ -45,6 +50,7 @@ impl Plugin for CameraPlugin {
             .insert_state(CameraMode::Normal)
             .add_systems(OnEnter(CameraMode::Normal), setup_camera)
             .add_systems(OnEnter(CameraMode::AllTopDown), setup_camera)
-            .add_systems(OnEnter(CameraMode::AllAngled), setup_camera);
+            .add_systems(OnEnter(CameraMode::AllAngled), setup_camera)
+            .add_systems(OnEnter(CameraMode::FirstPerson), setup_camera);
     }
 }

@@ -15,7 +15,7 @@ impl Plugin for DeveloperPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            manual_camera.run_if(in_state(CameraMode::AllTopDown)),
+            manual_camera.run_if(not(in_state(CameraMode::Normal))),
         )
         .add_systems(Update, developer_keyboard)
         .add_systems(Update, standard_gizmos);
@@ -32,22 +32,22 @@ fn manual_camera(keys: Res<ButtonInput<KeyCode>>, mut camera: Query<(&Camera, &m
     let mut delta = Vec3::ZERO;
 
     if keys.pressed(KeyCode::ArrowUp) || keys.pressed(KeyCode::Numpad8) {
-        delta += -Vec3::Z;
+        delta += -Vec3::Z / 2.0;
     }
     if keys.pressed(KeyCode::ArrowDown) || keys.pressed(KeyCode::Numpad2) {
-        delta += Vec3::Z;
+        delta += Vec3::Z / 2.0;
     }
     if keys.pressed(KeyCode::ArrowLeft) || keys.pressed(KeyCode::Numpad4) {
-        delta += -Vec3::X;
+        delta += -Vec3::X / 2.0;
     }
     if keys.pressed(KeyCode::ArrowRight) || keys.pressed(KeyCode::Numpad6) {
-        delta += Vec3::X;
+        delta += Vec3::X / 2.0;
     }
-    if keys.pressed(KeyCode::Numpad7) {
-        delta += -Vec3::Y;
+    if keys.pressed(KeyCode::Numpad7) || keys.pressed(KeyCode::Equal) {
+        delta += -Vec3::Y / 2.0;
     }
-    if keys.pressed(KeyCode::Numpad1) {
-        delta += Vec3::Y;
+    if keys.pressed(KeyCode::Numpad1) || keys.pressed(KeyCode::Minus) {
+        delta += Vec3::Y / 2.0;
     }
 
     for (_, mut transform) in camera.iter_mut() {
@@ -99,11 +99,14 @@ fn developer_keyboard(
         activity.set(Activity::Building);
     }
     if keys.just_pressed(KeyCode::KeyC) {
-        match camera_mode.get() {
-            CameraMode::Normal => new_camera_mode.set(CameraMode::AllTopDown),
-            CameraMode::AllTopDown => new_camera_mode.set(CameraMode::AllAngled),
-            CameraMode::AllAngled => new_camera_mode.set(CameraMode::Normal),
-        }
+        let mode = match camera_mode.get() {
+            CameraMode::Normal => CameraMode::AllTopDown,
+            CameraMode::AllTopDown => CameraMode::AllAngled,
+            CameraMode::AllAngled => CameraMode::FirstPerson,
+            CameraMode::FirstPerson => CameraMode::Normal,
+        };
+        info!("camera: {:?}", mode);
+        new_camera_mode.set(mode);
     }
     if keys.just_pressed(KeyCode::KeyW) {
         info!("toggle-wireframe");
