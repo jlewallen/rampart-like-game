@@ -13,7 +13,45 @@ pub struct DeveloperPlugin;
 
 impl Plugin for DeveloperPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, developer_keyboard);
+        app.add_systems(
+            Update,
+            manual_camera.run_if(in_state(CameraMode::AllTopDown)),
+        )
+        .add_systems(Update, developer_keyboard)
+        .add_systems(Update, standard_gizmos);
+    }
+}
+
+fn standard_gizmos(mut gizmos: Gizmos, lights: Query<(&PointLight, &GlobalTransform)>) {
+    for (_light, transform) in lights.iter() {
+        gizmos.sphere(transform.translation(), Quat::IDENTITY, 0.5, Color::RED);
+    }
+}
+
+fn manual_camera(keys: Res<ButtonInput<KeyCode>>, mut camera: Query<(&Camera, &mut Transform)>) {
+    let mut delta = Vec3::ZERO;
+
+    if keys.pressed(KeyCode::ArrowUp) || keys.pressed(KeyCode::Numpad8) {
+        delta += -Vec3::Z;
+    }
+    if keys.pressed(KeyCode::ArrowDown) || keys.pressed(KeyCode::Numpad2) {
+        delta += Vec3::Z;
+    }
+    if keys.pressed(KeyCode::ArrowLeft) || keys.pressed(KeyCode::Numpad4) {
+        delta += -Vec3::X;
+    }
+    if keys.pressed(KeyCode::ArrowRight) || keys.pressed(KeyCode::Numpad6) {
+        delta += Vec3::X;
+    }
+    if keys.pressed(KeyCode::Numpad7) {
+        delta += -Vec3::Y;
+    }
+    if keys.pressed(KeyCode::Numpad1) {
+        delta += Vec3::Y;
+    }
+
+    for (_, mut transform) in camera.iter_mut() {
+        transform.translation += delta;
     }
 }
 
@@ -26,15 +64,23 @@ fn developer_keyboard(
     mut activity: ResMut<NextState<Activity>>,
     mut wireframe_config: ResMut<WireframeConfig>,
     mut new_expiration_control: ResMut<NextState<ExpirationControl>>,
+    mut config_store: ResMut<GizmoConfigStore>,
 ) {
     if keys.just_pressed(KeyCode::Space) {
         info!("{:?}", KeyCode::Space);
     }
     if keys.just_pressed(KeyCode::KeyE) {
-        match expiration_control.get() {
-            ExpirationControl::Running => new_expiration_control.set(ExpirationControl::Paused),
-            ExpirationControl::Paused => new_expiration_control.set(ExpirationControl::Running),
-        }
+        let setting = match expiration_control.get() {
+            ExpirationControl::Running => ExpirationControl::Paused,
+            ExpirationControl::Paused => ExpirationControl::Running,
+        };
+        info!("expirations-toggled: {:?}", setting);
+        new_expiration_control.set(setting);
+    }
+    if keys.just_pressed(KeyCode::Digit1) {
+        let (config, _) = config_store.config_mut::<DefaultGizmoConfigGroup>();
+        config.enabled = !config.enabled;
+        info!("gizmo-config: {:?}", config.enabled);
     }
     if keys.just_pressed(KeyCode::KeyR) {
         info!("resetting");

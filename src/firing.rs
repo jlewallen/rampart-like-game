@@ -24,7 +24,9 @@ impl Plugin for FiringPlugin {
 pub trait Projectile {}
 
 #[derive(Component, Clone, Debug)]
-pub struct RoundShot {}
+pub struct RoundShot {
+    target: Vec3,
+}
 
 impl Projectile for RoundShot {}
 
@@ -90,6 +92,7 @@ struct RoundShotBundle {
 impl RoundShotBundle {
     fn new(
         position: Vec3,
+        target: Vec3,
         velocity: Vec3,
         mass: f32,
         player: Player,
@@ -112,7 +115,7 @@ impl RoundShotBundle {
             body: RigidBody::Dynamic,
             lifetime: GamePlayLifetime,
             active_events: ActiveEvents::COLLISION_EVENTS,
-            projectile: RoundShot {},
+            projectile: RoundShot { target },
             player,
             collider: Collider::ball(ROUND_SHOT_DIAMETER / 2.),
             velocity: Velocity {
@@ -187,6 +190,7 @@ fn pick_target(
 
             commands.spawn(RoundShotBundle::new(
                 initial,
+                target,
                 velocity,
                 mass,
                 player.clone(),
@@ -205,7 +209,7 @@ fn check_collisions(
     mut explosions: EventWriter<ExplosionEvent>,
     mut effects: ResMut<Assets<EffectAsset>>,
     asset_server: ResMut<AssetServer>,
-    terrain: Query<&Terrain>,
+    _terrain: Query<&Terrain>,
     projectiles: Query<Option<&RoundShot>>,
     transforms: Query<&Transform>,
     names: Query<&Name>,
@@ -213,33 +217,31 @@ fn check_collisions(
     for collision_event in collision_events.read() {
         match collision_event {
             CollisionEvent::Started(first, second, _) => {
-                let (target, projectile) = {
-                    if projectiles
-                        .get(*first)
-                        .expect("Projectile check failed")
-                        .is_some()
-                    {
-                        (second, first)
-                    } else {
-                        (first, second)
-                    }
+                let (target, projectile, round_shot) = match (
+                    projectiles.get(*first).expect("Projectile check failed"),
+                    projectiles.get(*second).expect("Projectile check failed"),
+                ) {
+                    (None, Some(projectile)) => (first, second, projectile),
+                    (Some(projectile), None) => (second, first, projectile),
+                    (Some(_), Some(_)) => todo!(),
+                    (None, None) => todo!(),
                 };
 
                 let showtime = transforms.get(*projectile).expect("No collision entity");
-                let survey = terrain.single().survey(showtime.translation);
+                let collision_at = showtime.translation;
+                let explosion_at = round_shot.target;
 
-                explosions.send(ExplosionEvent::new(showtime.translation));
+                explosions.send(ExplosionEvent::new(explosion_at));
 
                 commands.entity(*projectile).despawn_recursive();
 
-                let circle: Handle<Image> = asset_server.load("circle.png");
-
                 info!(
-                    "collision: target={:?} projectile={:?} location={:?} survey={:?}",
-                    names.get(*target).map(|s| s.as_str()),
-                    names.get(*projectile).map(|s| s.as_str()),
-                    showtime.translation,
-                    survey
+                    %collision_at,
+                    %explosion_at,
+                    "collision: target={:?} projectile={:?} ({:?})",
+                    names.get(*target).ok().map(|s| s.as_str()),
+                    names.get(*projectile).ok().map(|s| s.as_str()),
+                    explosion_at - collision_at
                 );
 
                 let mut colors = Gradient::new();
@@ -268,6 +270,8 @@ fn check_collisions(
                 let update_accel = AccelModifier::new(module.lit(Vec3::new(0., -9.8, 0.)));
                 let update_drag = LinearDragModifier::new(module.lit(1.5));
 
+                let circle: Handle<Image> = asset_server.load("circle.png");
+
                 let particle_texture_modifier = ParticleTextureModifier {
                     texture: circle,
                     sample_mapping: ImageSampleMapping::Modulate,
@@ -294,7 +298,7 @@ fn check_collisions(
                         Name::new("Explosion"),
                         helpers::Expires::after(2.5),
                         SpatialBundle {
-                            transform: Transform::from_translation(showtime.translation),
+                            transform: Transform::from_translation(explosion_at),
                             ..default()
                         },
                     ))
@@ -311,6 +315,7 @@ fn check_collisions(
                             Name::new("Explosion:Light"),
                             helpers::Expires::after(0.05),
                             PointLightBundle {
+                                transform: Transform::from_translation(Vec3::Y * 1.),
                                 point_light: PointLight {
                                     // 1,000,000 lumens is a very large "cinema light" capable of registering brightly at Bevy's
                                     // default "very overcast day" exposure level. For "indoor lighting" with a lower exposure,

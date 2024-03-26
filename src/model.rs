@@ -20,7 +20,7 @@ pub const BRICK_COLOR: &str = "e7444a";
 
 // We base all the math on a desired time of flight that
 // looks appropriate for the distance.
-pub const MAXIMUM_HORIZONTAL_DISTANCE: f32 = 35.0;
+pub const MAXIMUM_HORIZONTAL_DISTANCE: f32 = 65.0;
 pub const MINIMUM_FLIGHT_TIME: f32 = 1.0;
 pub const GRAVITY: f32 = 9.8;
 
