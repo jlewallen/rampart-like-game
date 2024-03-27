@@ -145,6 +145,10 @@ impl Survey {
     pub fn cell(&self) -> &SurveyedCell {
         &self.cell
     }
+
+    pub fn can_build(&self) -> bool {
+        self.cell.can_build()
+    }
 }
 
 #[derive(Debug)]
@@ -152,6 +156,16 @@ pub enum SurveyedCell {
     Ground(HeightOnlyCell),
     Beach,
     Water,
+}
+
+impl SurveyedCell {
+    fn can_build(&self) -> bool {
+        match self {
+            SurveyedCell::Ground(_) => true,
+            SurveyedCell::Beach => false,
+            SurveyedCell::Water => false,
+        }
+    }
 }
 
 impl From<HeightOnlyCell> for SurveyedCell {

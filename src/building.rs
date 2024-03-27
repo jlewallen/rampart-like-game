@@ -73,7 +73,7 @@ fn start_placing(
         Name::new("Placing"),
         Pickable::IGNORE,
         GamePlayLifetime,
-        Placing { allowed: true },
+        Placing::default(),
         PbrBundle {
             mesh: meshes.add(Cuboid::new(TILE_SIZE, 0.2, TILE_SIZE)),
             material: materials.add(StandardMaterial {
@@ -94,7 +94,9 @@ fn stop_placing(mut commands: Commands, placing: Query<(Entity, &Placing)>) {
 
 fn placing(
     mut events: EventReader<Pointer<Move>>,
-    mut placing: Query<(&mut Placing, &mut Transform)>,
+    mut placing: Query<(&mut Placing, &mut Transform, &Handle<StandardMaterial>)>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    structures: Res<StructureLayers>,
     terrain: Query<&Terrain>,
 ) {
     if events.is_empty() {
@@ -108,7 +110,15 @@ fn placing(
     for event in events.read() {
         if let Some(position) = event.event.hit.position {
             if let Some(survey) = terrain.survey(position) {
-                for (_, mut transform) in &mut placing {
+                for (mut placing, mut transform, mh) in &mut placing {
+                    let can_build = survey.can_build()
+                        && structures
+                            .get(survey.location())
+                            .map(|v| v.can_build())
+                            .unwrap_or_default();
+                    placing.allowed = can_build;
+                    materials.get_mut(mh).unwrap().base_color =
+                        if can_build { Color::WHITE } else { Color::RED };
                     *transform = Transform::from_translation(survey.world());
                 }
             }
@@ -118,8 +128,9 @@ fn placing(
 
 fn try_place(
     terrain: Query<&Terrain>,
+    _placing: Query<&mut Placing>,
+    structures: Res<StructureLayers>,
     mut events: EventReader<Pointer<Click>>,
-    _placing: Query<(&mut Placing, &mut Transform)>,
     mut modified: EventWriter<ConstructionEvent>,
 ) {
     if events.is_empty() {
@@ -133,28 +144,31 @@ fn try_place(
     for event in events.read() {
         if let Some(position) = event.event.hit.position {
             if let Some(survey) = terrain.survey(position) {
+                let can_build = survey.can_build() && structures.get(survey.location()).is_none();
+
                 info!("{:#?}", survey);
 
-                match survey.cell() {
-                    SurveyedCell::Ground(_cell) => {
-                        modified.send(ConstructionEvent::new(
-                            survey.location().into(),
-                            Structure::Wall(Wall {
-                                player: Player::One,
-                            }),
-                        ));
+                if can_build {
+                    match survey.cell() {
+                        SurveyedCell::Ground(_cell) => {
+                            modified.send(ConstructionEvent::new(
+                                survey.location().into(),
+                                Structure::Wall(Wall {
+                                    player: Player::One,
+                                }),
+                            ));
+                        }
+                        SurveyedCell::Beach => {}
+                        SurveyedCell::Water => {}
                     }
-                    SurveyedCell::Beach => {}
-                    SurveyedCell::Water => {}
                 }
             }
         }
     }
 }
 
-#[derive(Component, Debug)]
+#[derive(Clone, Debug, Component, Default)]
 struct Placing {
-    #[allow(dead_code)]
     allowed: bool,
 }
 
@@ -187,6 +201,15 @@ pub enum StructureEntity {
 }
 
 impl StructureEntity {
+    fn can_build(&self) -> bool {
+        match self {
+            StructureEntity::Empty => true,
+            StructureEntity::New(_) => false,
+            StructureEntity::Affected(_, _) => false,
+            StructureEntity::Current(_, _) => false,
+        }
+    }
+
     fn affected(&self) -> Self {
         match self {
             StructureEntity::Empty => StructureEntity::Empty,
@@ -292,6 +315,10 @@ impl StructureLayers {
         );
     }
 
+    fn get(&self, grid: IVec2) -> Option<&StructureEntity> {
+        self.entities.get_xy(grid)
+    }
+
     fn set(&mut self, grid: IVec2, structure: Structure) {
         self.entities.set(grid, StructureEntity::New(structure));
 
@@ -349,7 +376,7 @@ impl StructureLayers {
 
                 let position = position + offset;
 
-                info!(%grid, %position, %offset, "create-structure");
+                trace!(%grid, %position, %offset, "create-structure");
 
                 commands
                     .spawn(WallBundle::new(grid, position, wall.clone()))
