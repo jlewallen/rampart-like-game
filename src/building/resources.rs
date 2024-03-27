@@ -48,6 +48,7 @@ pub fn load(
     })
 }
 
+#[allow(dead_code)]
 pub const HIGHLIGHT_TINT: Highlight<StandardMaterial> = Highlight {
     hovered: Some(HighlightKind::new_dynamic(|matl| StandardMaterial {
         // base_color: matl.base_color + Color::rgba(-0.2, -0.2, 0.4, 0.0),

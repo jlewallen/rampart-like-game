@@ -206,6 +206,62 @@ impl StructureEntity {
     }
 }
 
+#[derive(Bundle)]
+pub struct CannonBundle {
+    name: Name,
+    lifetime: GamePlayLifetime,
+    spatial: SpatialBundle,
+    collider: Collider,
+    collision_groups: CollisionGroups,
+    player: Player,
+    cannon: Cannon,
+}
+
+impl CannonBundle {
+    fn new(grid: IVec2, position: Vec3, cannon: Cannon) -> Self {
+        Self {
+            name: Name::new(format!("Cannon-{:?}", &grid)),
+            lifetime: GamePlayLifetime,
+            spatial: SpatialBundle {
+                transform: Transform::from_translation(position),
+                ..default()
+            },
+            collider: Collider::cuboid(TILE_SIZE / 2., STRUCTURE_HEIGHT / 2., TILE_SIZE / 2.),
+            collision_groups: CollisionGroups::new(Group::all(), Group::all()),
+            player: cannon.player.clone(),
+            cannon,
+        }
+    }
+}
+
+#[derive(Bundle)]
+pub struct WallBundle {
+    name: Name,
+    lifetime: GamePlayLifetime,
+    spatial: SpatialBundle,
+    collider: Collider,
+    collision_groups: CollisionGroups,
+    player: Player,
+    wall: Wall,
+}
+
+impl WallBundle {
+    fn new(grid: IVec2, position: Vec3, wall: Wall) -> Self {
+        Self {
+            name: Name::new(format!("Wall-{:?}", &grid)),
+            lifetime: GamePlayLifetime,
+            spatial: SpatialBundle {
+                transform: Transform::from_translation(position),
+                ..default()
+            },
+            collider: Collider::cuboid(TILE_SIZE / 2., STRUCTURE_HEIGHT / 2., TILE_SIZE / 2.),
+            collision_groups: CollisionGroups::new(Group::all(), Group::all()),
+            player: wall.player.clone(),
+            wall,
+        }
+    }
+}
+
 #[derive(Default, Resource)]
 pub struct StructureLayers {
     entities: SquareGrid<StructureEntity>,
@@ -296,21 +352,7 @@ impl StructureLayers {
                 info!(%grid, %position, %offset, "create-structure");
 
                 commands
-                    .spawn((
-                        Name::new(format!("Wall{:?}", &grid)),
-                        SpatialBundle {
-                            transform: Transform::from_translation(position),
-                            ..default()
-                        },
-                        GamePlayLifetime,
-                        PickableBundle::default(),
-                        Collider::cuboid(TILE_SIZE / 2., STRUCTURE_HEIGHT / 2., TILE_SIZE / 2.),
-                        CollisionGroups::new(Group::all(), Group::all()),
-                        Coordinates::new(grid),
-                        wall.player.clone(),
-                        wall.clone(),
-                        resources::HIGHLIGHT_TINT,
-                    ))
+                    .spawn(WallBundle::new(grid, position, wall.clone()))
                     .with_children(|parent| match connecting {
                         ConnectingWall::Isolated => {
                             parent.spawn(PbrBundle {
@@ -355,21 +397,7 @@ impl StructureLayers {
                 let offset = Vec3::Y * (STRUCTURE_HEIGHT / 2.0);
                 let position = position + offset;
                 commands
-                    .spawn((
-                        Name::new(format!("Cannon{:?}", &grid)),
-                        GamePlayLifetime,
-                        SpatialBundle {
-                            transform: Transform::from_translation(position),
-                            ..default()
-                        },
-                        PickableBundle::default(),
-                        CollisionGroups::new(Group::all(), Group::all()),
-                        Collider::cuboid(TILE_SIZE / 2., STRUCTURE_HEIGHT / 2., TILE_SIZE / 2.),
-                        Coordinates::new(grid),
-                        cannon.player.clone(),
-                        cannon.clone(),
-                        resources::HIGHLIGHT_TINT,
-                    ))
+                    .spawn(CannonBundle::new(grid, position, cannon.clone()))
                     .with_children(|parent| {
                         parent.spawn(SceneBundle {
                             scene: resources.cannon.clone(),
