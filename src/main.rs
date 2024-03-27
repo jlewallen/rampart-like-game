@@ -1,4 +1,4 @@
-use bevy::{diagnostic::FrameTimeDiagnosticsPlugin, window::WindowResolution};
+use bevy::window::WindowResolution;
 use bevy::{
     input::common_conditions::input_toggle_active,
     pbr::wireframe::{WireframeConfig, WireframePlugin},
@@ -57,6 +57,7 @@ fn main() {
                     primary_window: Some(Window {
                         title: "Castle".to_string(),
                         resolution: WindowResolution::new(1024. + 256. + 32., 768.0),
+                        present_mode: bevy::window::PresentMode::AutoNoVsync,
                         ..default()
                     }),
                     ..default()
@@ -68,7 +69,6 @@ fn main() {
         .add_plugins(WireframePlugin)
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
         .add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new().run_if(input_toggle_active(false, KeyCode::KeyI)))
-        .add_plugins(FrameTimeDiagnosticsPlugin)
         .add_plugins(helpers::HelpersPlugin)
         .add_plugins(AppStatePlugin)
         .add_plugins(camera::CameraPlugin)
@@ -104,6 +104,7 @@ fn enter_game(
     commands.insert_resource(model::Settings::default());
     app_state.set(model::AppState::Game);
     activity.set(model::Activity::Observing);
+    commands.spawn(iyes_perf_ui::PerfUiCompleteBundle::default());
 }
 
 fn progress_game(

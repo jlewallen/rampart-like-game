@@ -6,19 +6,20 @@ use crate::{
     model::{Activity, AppState},
 };
 
-// .add_plugins(RapierDebugRenderPlugin::default())
-// .add_plugins(LogDiagnosticsPlugin::default())
-
 pub struct DeveloperPlugin;
 
 impl Plugin for DeveloperPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            manual_camera.run_if(not(in_state(CameraMode::Normal))),
-        )
-        .add_systems(Update, developer_keyboard)
-        .add_systems(Update, standard_gizmos);
+        app.add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin)
+            .add_plugins(bevy::diagnostic::EntityCountDiagnosticsPlugin)
+            .add_plugins(bevy::diagnostic::SystemInformationDiagnosticsPlugin)
+            .add_plugins(iyes_perf_ui::PerfUiPlugin)
+            .add_systems(
+                Update,
+                manual_camera.run_if(not(in_state(CameraMode::Normal))),
+            )
+            .add_systems(Update, developer_keyboard)
+            .add_systems(Update, standard_gizmos);
     }
 }
 
