@@ -16,6 +16,7 @@ pub struct FiringPlugin;
 impl Plugin for FiringPlugin {
     fn build(&self, app: &mut App) {
         app.add_event::<ExplosionEvent>()
+            .add_systems(Startup, setup)
             .add_systems(Update, pick_target.run_if(in_state(Activity::Firing)))
             .add_systems(Update, check_collisions.run_if(in_state(Activity::Firing)));
     }
@@ -202,17 +203,95 @@ fn pick_target(
     }
 }
 
+#[derive(Resource)]
+struct ExplosionResources {
+    effect: Handle<EffectAsset>,
+}
+
+fn setup(
+    mut commands: Commands,
+    mut effects: ResMut<Assets<EffectAsset>>,
+    asset_server: ResMut<AssetServer>,
+) {
+    let mut colors = Gradient::new();
+    colors.add_key(0.0, Vec4::new(4.0, 4.0, 4.0, 1.0));
+    colors.add_key(0.1, Vec4::new(4.0, 4.0, 0.0, 1.0));
+    colors.add_key(0.9, Vec4::new(4.0, 0.0, 0.0, 1.0));
+    colors.add_key(1.0, Vec4::new(4.0, 0.0, 0.0, 0.0));
+
+    let mut sizes = Gradient::new();
+    sizes.add_key(0.0, Vec2::splat(0.15));
+    sizes.add_key(0.3, Vec2::splat(0.1));
+    sizes.add_key(0.8, Vec2::splat(0.01));
+    sizes.add_key(1.0, Vec2::splat(0.0));
+
+    let mut module = Module::default();
+    let init_position = SetPositionSphereModifier {
+        dimension: ShapeDimension::Volume,
+        center: module.lit(Vec3::ZERO),
+        radius: module.lit(0.5),
+    };
+    let init_velocity = SetVelocitySphereModifier {
+        center: module.lit(Vec3::ZERO),
+        speed: module.lit(20.),
+    };
+    let init_lifetime = SetAttributeModifier::new(Attribute::LIFETIME, module.lit(2.0));
+    let update_accel = AccelModifier::new(module.lit(Vec3::new(0., -9.8, 0.)));
+    let update_drag = LinearDragModifier::new(module.lit(1.5));
+
+    let circle: Handle<Image> = asset_server.load("circle.png");
+
+    let particle_texture_modifier = ParticleTextureModifier {
+        texture: circle,
+        sample_mapping: ImageSampleMapping::Modulate,
+    };
+
+    let effect = effects.add(
+        EffectAsset::new(256, Spawner::once(256.0.into(), true), module)
+            .init(init_position)
+            .init(init_velocity)
+            .init(init_lifetime)
+            .update(update_drag)
+            .update(update_accel)
+            .render(ColorOverLifetimeModifier { gradient: colors })
+            .render(SizeOverLifetimeModifier {
+                gradient: sizes,
+                screen_space_size: false,
+            })
+            .render(particle_texture_modifier),
+    );
+
+    // Hack! For some reason the first one of these spawned never does anything.
+    // I believe there's something going on with `Spawner::once` and the
+    // initialization of the effect. Either way, this fixes things and will be
+    // easy to delete if I can ever figure out what's going on. I spawn well
+    // outside of any visible area.
+    commands.spawn((
+        Name::new("Explosion:Burst"),
+        ParticleEffectBundle {
+            effect: ParticleEffect::new(effect.clone())
+                // You can actually change this so nothing is emitted and it'll still fix the issue.
+                .with_spawner(Spawner::once(256.0.into(), true)),
+            transform: Transform::from_translation(Vec3::Y * 1000.0),
+            ..Default::default()
+        },
+    ));
+
+    commands.insert_resource(ExplosionResources { effect });
+
+    info!("explosions-ready");
+}
+
 fn check_collisions(
     mut commands: Commands,
     mut collision_events: EventReader<CollisionEvent>,
     mut contact_force_events: EventReader<ContactForceEvent>,
     mut explosions: EventWriter<ExplosionEvent>,
-    mut effects: ResMut<Assets<EffectAsset>>,
-    asset_server: ResMut<AssetServer>,
     _terrain: Query<&Terrain>,
     projectiles: Query<Option<&RoundShot>>,
     transforms: Query<&Transform>,
     names: Query<&Name>,
+    resources: Res<ExplosionResources>,
 ) {
     for collision_event in collision_events.read() {
         match collision_event {
@@ -244,55 +323,6 @@ fn check_collisions(
                     explosion_at - collision_at
                 );
 
-                let mut colors = Gradient::new();
-                colors.add_key(0.0, Vec4::new(4.0, 4.0, 4.0, 1.0));
-                colors.add_key(0.1, Vec4::new(4.0, 4.0, 0.0, 1.0));
-                colors.add_key(0.9, Vec4::new(4.0, 0.0, 0.0, 1.0));
-                colors.add_key(1.0, Vec4::new(4.0, 0.0, 0.0, 0.0));
-
-                let mut sizes = Gradient::new();
-                sizes.add_key(0.0, Vec2::splat(0.15));
-                sizes.add_key(0.3, Vec2::splat(0.1));
-                sizes.add_key(0.8, Vec2::splat(0.01));
-                sizes.add_key(1.0, Vec2::splat(0.0));
-
-                let mut module = Module::default();
-                let init_position = SetPositionSphereModifier {
-                    dimension: ShapeDimension::Volume,
-                    center: module.lit(Vec3::ZERO),
-                    radius: module.lit(0.5),
-                };
-                let init_velocity = SetVelocitySphereModifier {
-                    center: module.lit(Vec3::ZERO),
-                    speed: module.lit(20.),
-                };
-                let init_lifetime = SetAttributeModifier::new(Attribute::LIFETIME, module.lit(2.0));
-                let update_accel = AccelModifier::new(module.lit(Vec3::new(0., -9.8, 0.)));
-                let update_drag = LinearDragModifier::new(module.lit(1.5));
-
-                let circle: Handle<Image> = asset_server.load("circle.png");
-
-                let particle_texture_modifier = ParticleTextureModifier {
-                    texture: circle,
-                    sample_mapping: ImageSampleMapping::Modulate,
-                };
-
-                // TODO Leaking?
-                let effect = effects.add(
-                    EffectAsset::new(256, Spawner::once(256.0.into(), true), module)
-                        .init(init_position)
-                        .init(init_velocity)
-                        .init(init_lifetime)
-                        .update(update_drag)
-                        .update(update_accel)
-                        .render(ColorOverLifetimeModifier { gradient: colors })
-                        .render(SizeOverLifetimeModifier {
-                            gradient: sizes,
-                            screen_space_size: false,
-                        })
-                        .render(particle_texture_modifier),
-                );
-
                 commands
                     .spawn((
                         Name::new("Explosion"),
@@ -306,7 +336,7 @@ fn check_collisions(
                         child_builder.spawn((
                             Name::new("Explosion:Burst"),
                             ParticleEffectBundle {
-                                effect: ParticleEffect::new(effect),
+                                effect: ParticleEffect::new(resources.effect.clone()),
                                 transform: Transform::IDENTITY,
                                 ..Default::default()
                             },

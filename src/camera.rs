@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy::{core_pipeline::bloom::BloomSettings, prelude::*};
 use bevy_rts_camera::{RtsCamera, RtsCameraControls, RtsCameraPlugin};
 
 #[derive(Debug, Clone, Default, Hash, PartialEq, Eq, States)]
@@ -26,6 +26,7 @@ fn setup_camera(
             Camera3dBundle::default(),
             RtsCamera::default(),
             RtsCameraControls::default(),
+            BloomSettings::default(),
         )),
         CameraMode::AllTopDown => commands.spawn((Camera3dBundle {
             transform: Transform::from_xyz(0., 84., 0.).looking_at(Vec3::new(0., 0., 0.), -Vec3::Z),
